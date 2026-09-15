@@ -1,0 +1,13 @@
+CC0 1.0 Universal (public domain dedication)
+
+Everything under samplelib/ is NOT a recording of anything.  Each sample was
+rendered by the synthesisers in this repository (physical models, modal and
+waveguide synthesis).  No third-party audio, sample CD, field recording or
+model output was used, so no third party holds any copyright in them.
+
+To the extent possible under law, the authors dedicate the contents of
+samplelib/ to the public domain (CC0 1.0 Universal).
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Generated songs under songs/ are likewise free of third-party material and
+may be used for any purpose, commercial or otherwise, without attribution.
