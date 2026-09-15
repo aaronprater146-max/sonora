@@ -88,14 +88,24 @@ def tanh_sat(x, drive=1.0, ceiling=0.85):
     happens to be.  Without this every instrument would saturate into a
     square wave (which is exactly what "8-bit" sounds like).
     """
-    x = np.asarray(x, dtype=np.float64)
+    x = np.asarray(x)
     if drive <= 1.0001 and not ceiling:
         return x.astype(FLOAT)
     if ceiling:
-        pk = float(np.percentile(np.abs(x), 99.0)) if x.size else 0.0
-        if pk > 1e-9:
-            x = x * (ceiling / pk)
-    return (np.tanh(x * drive) / math.tanh(drive)).astype(FLOAT)
+        # subsample for the level estimate: a percentile over every sample of
+        # a three minute mix is a 136 MB temporary for no audible benefit
+        step = max(1, x.shape[0] // 200000)
+        pk = float(np.percentile(np.abs(x[::step]).astype(np.float64), 99.0)) if x.size else 0.0
+        g = ceiling / pk if pk > 1e-9 else 1.0
+    else:
+        g = 1.0
+    inv = 1.0 / math.tanh(drive)
+    out = np.empty(x.shape, dtype=FLOAT)
+    step = 1 << 18
+    for i in range(0, x.shape[0], step):
+        j = min(x.shape[0], i + step)
+        out[i:j] = np.tanh(np.asarray(x[i:j], dtype=np.float64) * g * drive) * inv
+    return out
 
 
 def soft_clip(x, ceil=0.9):
@@ -282,39 +292,60 @@ def _bq(mode, f0, q, gain_db=0.0, sr=SR):
     return [c / a0 for c in b], [c / a0 for c in a]
 
 
+def _apply(x, b, a, chunk: int = 1 << 16):
+    """run a biquad over a long signal in blocks, carrying filter state.
+
+    Keeps float64 coefficients (low frequency EQ needs the precision) but
+    never materialises a float64 copy of the whole song -- on a three minute
+    mix that was 136 MB per filter stage, and there are a dozen of them.
+    """
+    x = np.asarray(x)
+    n = x.shape[0]
+    if n == 0:
+        return x.astype(FLOAT)
+    nzi = max(len(a), len(b)) - 1
+    zi = np.zeros((x.shape[1], nzi)) if x.ndim == 2 else np.zeros(nzi)
+    out = np.empty(x.shape, dtype=FLOAT)
+    for i in range(0, n, chunk):
+        j = min(n, i + chunk)
+        y, zi = lfilter(b, a, np.asarray(x[i:j], dtype=np.float64), axis=0, zi=zi)
+        out[i:j] = y.astype(FLOAT)
+    return out
+
+
 def lowpass(x, f0, q=0.707):
     b, a = _bq("lp", f0, q)
-    return lfilter(b, a, np.asarray(x, dtype=np.float64)).astype(FLOAT)
+    return _apply(x, b, a)
 
 
 def highpass(x, f0, q=0.707):
     b, a = _bq("hp", f0, q)
-    return lfilter(b, a, np.asarray(x, dtype=np.float64)).astype(FLOAT)
+    return _apply(x, b, a)
 
 
 def bandpass(x, f0, q=1.0):
     b, a = _bq("bp", f0, q)
-    return lfilter(b, a, np.asarray(x, dtype=np.float64)).astype(FLOAT)
+    return _apply(x, b, a)
 
 
 def notch(x, f0, q=4.0):
     b, a = _bq("notch", f0, q)
-    return lfilter(b, a, np.asarray(x, dtype=np.float64)).astype(FLOAT)
+    return _apply(x, b, a)
 
 
 def peak_eq(x, f0, gain_db, q=1.0):
     b, a = _bq("peak", f0, q, gain_db)
-    return lfilter(b, a, np.asarray(x, dtype=np.float64)).astype(FLOAT)
+    return _apply(x, b, a)
 
 
 def low_shelf(x, f0, gain_db, q=0.707):
     b, a = _bq("ls", f0, q, gain_db)
-    return lfilter(b, a, np.asarray(x, dtype=np.float64)).astype(FLOAT)
+    return _apply(x, b, a)
 
 
 def high_shelf(x, f0, gain_db, q=0.707):
     b, a = _bq("hs", f0, q, gain_db)
-    return lfilter(b, a, np.asarray(x, dtype=np.float64)).astype(FLOAT)
+    return _apply(x, b, a)
 
 
 def filt_env(x, cutoff, q=0.707, mode="lp", chunk=64):
@@ -405,7 +436,7 @@ def crossover(x, fc: float):
     """
     x = ensure2(x)
     lo = lowpass(lowpass(x, fc, 0.7071), fc, 0.7071)
-    hi = highpass(highpass(x, fc, 0.7071), fc, 0.7071)
+    hi = (x.astype(np.float32) - lo).astype(FLOAT)
     return lo, hi
 
 
@@ -581,59 +612,99 @@ def _gain_curve(lvl, thresh, ratio, knee):
     return g
 
 
+def _expand(g, n, block, out=None):
+    """linear-interpolate a block-rate control signal up to sample rate.
+
+    Done in chunks into a pre-allocated float32 buffer: np.interp over a
+    three minute song builds an int64 index array plus a float64 result,
+    which is ~200 MB of pure garbage on a small machine.
+    """
+    if out is None:
+        out = np.empty(n, dtype=np.float32)
+    nb = g.shape[0]
+    src = np.arange(nb, dtype=np.float32) * np.float32(block)
+    step = 1 << 16
+    for i in range(0, n, step):
+        j = min(n, i + step)
+        out[i:j] = np.interp(np.arange(i, j, dtype=np.float32), src, g).astype(np.float32)
+    return out
+
+
 def compressor(x, thresh_db=-18.0, ratio=3.0, attack=0.008, release=0.12,
                knee=6.0, makeup=0.0, block=32):
     x = ensure2(x)
     n = x.shape[0]
     nb = max(1, n // block)
-    sq = (x[:nb * block, 0].astype(np.float64) ** 2 +
-          x[:nb * block, 1].astype(np.float64) ** 2) * 0.5
-    blocks = sq.reshape(nb, block).mean(axis=1)
-    lvl = 10 * np.log10(blocks + 1e-12)
+    blocks = np.empty(nb, dtype=np.float32)
+    step = nb * block
+    for i in range(0, step, 1 << 16):
+        j = min(step, i + (1 << 16))
+        seg = x[i:j].astype(np.float32)
+        k = (j - i) // block
+        sq = (seg[:, 0] ** 2 + seg[:, 1] ** 2) * np.float32(0.5)
+        blocks[i // block:i // block + k] = sq.reshape(k, block).mean(axis=1)
+    lvl = 10 * np.log10(blocks.astype(np.float64) + 1e-12)
     aa = math.exp(-block / max(1e-6, attack * SR))
     ar = math.exp(-block / max(1e-6, release * SR))
-    sm = np.empty(nb)
+    sm = np.empty(nb, dtype=np.float64)
     e = -120.0
     for i in range(nb):
         c = aa if lvl[i] > e else ar
         e = c * e + (1 - c) * lvl[i]
         sm[i] = e
-    g = db2amp(1.0) * np.exp(_gain_curve(sm, thresh_db, ratio, knee) * math.log(10) / 20.0)
-    g = db2amp(makeup) * g
-    gfull = np.interp(np.arange(n), np.arange(nb) * block, g)
-    return (x.astype(np.float64) * gfull[:, None]).astype(FLOAT)
+    g = np.exp(_gain_curve(sm, thresh_db, ratio, knee) * (math.log(10) / 20.0))
+    g = (g * db2amp(makeup)).astype(np.float32)
+    gfull = _expand(g, n, block)
+    out = np.empty((n, 2), dtype=np.float32)
+    for i in range(0, n, 1 << 16):
+        j = min(n, i + (1 << 16))
+        out[i:j, 0] = x[i:j, 0] * gfull[i:j]
+        out[i:j, 1] = x[i:j, 1] * gfull[i:j]
+    return out
 
 
 def limiter(x, ceil_db=-1.0, release=0.05, lookahead=0.002, block=32):
     x = ensure2(x)
     n = x.shape[0]
-    peak = np.abs(x).astype(np.float64).max(axis=1)
+    peak = np.abs(x).max(axis=1).astype(np.float32)
     la = max(1, sec(lookahead))
     nb = max(1, (n + la) // block)
-    pad = np.pad(peak, (0, nb * block + la - n))
+    pad = np.pad(peak, (0, max(0, nb * block + la - n)))
     win = np.lib.stride_tricks.sliding_window_view(pad, la)[::block]
-    env = win.max(axis=1)[:nb]
+    env = win.max(axis=1)[:nb].astype(np.float64)
     ceil = db2amp(ceil_db)
     g = np.minimum(1.0, ceil / np.maximum(env, 1e-9))
     rr = math.exp(-block / max(1e-6, release * SR))
-    gs = np.empty(nb)
+    gs = np.empty(nb, dtype=np.float32)
     prev = 1.0
     for i in range(nb):
         prev = g[i] if g[i] < prev else rr * prev + (1 - rr) * g[i]
         gs[i] = prev
-    gfull = np.interp(np.arange(n), np.arange(nb) * block, gs)
-    return (x.astype(np.float64) * gfull[:, None]).astype(FLOAT)
+    del win, pad, peak
+    gfull = _expand(gs, n, block)
+    out = np.empty((n, 2), dtype=np.float32)
+    for i in range(0, n, 1 << 16):
+        j = min(n, i + (1 << 16))
+        out[i:j, 0] = x[i:j, 0] * gfull[i:j]
+        out[i:j, 1] = x[i:j, 1] * gfull[i:j]
+    return out
 
 
 def multiband(x, low=(-20.0, 2.2), mid=(-20.0, 1.8), high=(-22.0, 2.6),
               xover=(150.0, 3600.0)):
-    x = ensure2(x).astype(np.float64)
-    lo = np.stack([lowpass(x[:, 0], xover[0]), lowpass(x[:, 1], xover[0])], 1)
+    x = ensure2(x).astype(FLOAT)
+    lo = lowpass(x, xover[0])
     rest = x - lo
-    md = np.stack([lowpass(rest[:, 0], xover[1]), lowpass(rest[:, 1], xover[1])], 1)
+    md = lowpass(rest, xover[1])
     hi = rest - md
-    out = (compressor(lo.astype(FLOAT), *low) + compressor(md.astype(FLOAT), *mid) +
-           compressor(hi.astype(FLOAT), *high))
+    del rest
+    out = compressor(lo, *low)
+    del lo
+    hi = compressor(hi, *high)
+    out += hi
+    del hi
+    md = compressor(md, *mid)
+    out += md
     return out.astype(FLOAT)
 
 
@@ -644,10 +715,9 @@ def stereo_width(x, width=1.25):
     return np.stack([m + s, m - s], 1).astype(FLOAT)
 
 
-def sidechain(x, times, amount_db=6.0, attack=0.004, release=0.18):
-    x = ensure2(x)
-    n = x.shape[0]
-    g = np.ones(n, dtype=np.float64)
+def sidechain_gain(times, n, amount_db=6.0, attack=0.004, release=0.18):
+    """the ducking envelope for a list of hit times (no signal needed)"""
+    g = np.ones(n, dtype=np.float32)
     amt = db2amp(-abs(amount_db))
     la, lr = max(1, sec(attack)), max(1, sec(release))
     for t in times:
@@ -660,7 +730,17 @@ def sidechain(x, times, amount_db=6.0, attack=0.004, release=0.18):
         s, e2 = i0 + la, min(n, i0 + la + lr)
         if e2 > s:
             g[s:e2] = np.minimum(g[s:e2], amt + (1 - amt) * np.linspace(0, 1, e2 - s))
-    return (x * g[:, None]).astype(FLOAT)
+    return g
+
+
+def sidechain(x, times, amount_db=6.0, attack=0.004, release=0.18):
+    x = ensure2(x)
+    g = sidechain_gain(times, x.shape[0], amount_db, attack, release)
+    out = np.empty_like(x)
+    for i in range(0, x.shape[0], 1 << 16):
+        j = min(x.shape[0], i + (1 << 16))
+        out[i:j] = x[i:j] * g[i:j, None]
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -668,12 +748,19 @@ def sidechain(x, times, amount_db=6.0, attack=0.004, release=0.18):
 # --------------------------------------------------------------------------
 
 def _k_weight(x):
-    """BS.1770 K-weighting: RLB high-pass + 4 dB high shelf"""
-    from scipy.signal import butter, lfilter
-    x = np.asarray(x, dtype=np.float64)
+    """BS.1770 K-weighting: RLB high-pass + 4 dB high shelf (chunked)"""
+    from scipy.signal import butter
+    x = np.asarray(x)
     b, a = butter(2, 38.0 / (SR / 2), "highpass")
-    x = lfilter(b, a, x)
-    return high_shelf(x.astype(FLOAT), 1681.0, 4.0, 0.7071).astype(np.float64)
+    n = x.shape[0]
+    out = np.empty(n, dtype=np.float64)
+    zi = np.zeros(max(len(a), len(b)) - 1)
+    step = 1 << 18
+    for i in range(0, n, step):
+        j = min(n, i + step)
+        y, zi = lfilter(b, a, np.asarray(x[i:j], dtype=np.float64), zi=zi)
+        out[i:j] = y
+    return high_shelf(out.astype(FLOAT), 1681.0, 4.0, 0.7071).astype(np.float64)
 
 
 def lufs(x):

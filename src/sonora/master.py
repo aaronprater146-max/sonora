@@ -5,12 +5,16 @@ release on a playlist.
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from .core import (SR, FLOAT, ensure2, np, highpass, lowpass, tilt_eq, peak_eq,
                    low_shelf, high_shelf, compressor, multiband, limiter,
                    stereo_width, tanh_sat, normalize_lufs, lufs, fade,
                    db2amp, amp2db, rms)
+
+MONO_FLOOR = 0.22   # minimum acceptable L/R correlation once the mix is widened
 
 
 def master(x: np.ndarray, target_lufs: float = -11.0, glue: float = 1.0,
@@ -36,8 +40,27 @@ def master(x: np.ndarray, target_lufs: float = -11.0, glue: float = 1.0,
                   low=(-19.0, 1.0 + 1.5 * glue),
                   mid=(-20.0, 1.0 + 1.1 * glue),
                   high=(-22.0, 1.0 + 1.8 * glue)).astype(FLOAT)
-    # 5. stereo image
+    # 5. stereo image -- with a mono-compatibility safety net.  Wide pads and
+    #    decorrelated reverb can push L/R into negative correlation, which
+    #    collapses the moment the track is summed to mono (clubs, phones,
+    #    Bluetooth).  Pull the sides back until the mix is mono-safe.
     x = stereo_width(x.astype(FLOAT), width).astype(FLOAT)
+    m = (x[:, 0] + x[:, 1]).astype(np.float64) * 0.5
+    s_ = (x[:, 0] - x[:, 1]).astype(np.float64) * 0.5
+    cm, cs = float((m * m).mean()), float((s_ * s_).mean())
+    cor = (cm - cs) / (cm + cs + 1e-12)
+    if cor < MONO_FLOOR:
+        # exact solve: scaling the side by f gives cor = (M - f^2 S)/(M + f^2 S)
+        f = math.sqrt(max(0.0, cm * (1.0 - MONO_FLOOR) / (cs * (1.0 + MONO_FLOOR) + 1e-12)))
+        f = float(np.clip(f, 0.3, 1.0))
+        out = np.empty_like(x)
+        for i in range(0, x.shape[0], 1 << 18):
+            j = min(x.shape[0], i + (1 << 18))
+            out[i:j, 0] = m[i:j] + s_[i:j] * f
+            out[i:j, 1] = m[i:j] - s_[i:j] * f
+        x = out.astype(FLOAT)
+    del m, s_
+
     # 6. gentle bus saturation for perceived loudness
     x = tanh_sat(x, 1.18, ceiling=0.92).astype(FLOAT)
     # 7. limiter + loudness

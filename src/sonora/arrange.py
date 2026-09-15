@@ -573,6 +573,13 @@ def automation(p: dict, n: int) -> np.ndarray:
     return sm
 
 
+def _mem(tag):
+    import os, resource
+    if os.environ.get("SONORA_MEMTRACE"):
+        print(f"      [{tag}] rss={resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024:.0f}MB",
+              flush=True)
+
+
 def render(p: dict, progress=None) -> np.ndarray:
     st = p["st"]
     total = p["total"]
@@ -599,9 +606,12 @@ def render(p: dict, progress=None) -> np.ndarray:
 
     mix += send_bus
     del send_bus
+    cache.d.clear()          # rendered stems can be hundreds of MB
+    _mem("stems mixed")
 
     # macrodynamics before the bus processing so the master glue works with it
     a = automation(p, mix.shape[0])
+    _mem("automation")
     mix = (mix.astype(np.float32) * a[:, None])
 
     # sidechain: duck everything above 120 Hz against the kick
@@ -613,11 +623,20 @@ def render(p: dict, progress=None) -> np.ndarray:
             for b in range(sec["bars"] * 4):
                 times.append(sec["start"] + b * p["spb"])
         sub, high = C.crossover(mix, 120.0)
-        mix = sub + C.sidechain(high, times, amount_db=st["sidechain"])
+        _mem("crossover")
+        # the ducking gain only depends on the kick times, so build it once
+        # and apply it in place instead of allocating another full mix
+        g = C.sidechain_gain(times, mix.shape[0], st["sidechain"])
+        for i in range(0, mix.shape[0], 1 << 16):
+            j = min(mix.shape[0], i + (1 << 16))
+            mix[i:j] = sub[i:j] + high[i:j] * g[i:j, None]
+        del sub, high, g
+        _mem("sidechain")
 
     import os
     if os.environ.get("SONORA_DEBUG"):
         C.write(os.environ["SONORA_DEBUG"], mix)
     mix = M.master(mix, target_lufs=st["lufs"], width=st["width"])
+    _mem("master")
     end = C.sec(total + 2.2)
     return C.fade(mix[:end], 0.02, 1.6)

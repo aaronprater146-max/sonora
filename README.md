@@ -132,6 +132,11 @@ ever holds the finished audio.
 
 ---
 
+## Songs
+
+`songs/` holds rendered tracks with the exact command that made them. Every
+one is free to use for anything, commercial included (CC0).
+
 ## Honest limitations
 
 * **No sung lyrics.** `voice.py` is a formant synthesiser: it produces
@@ -139,8 +144,11 @@ ever holds the finished audio.
   words. Real lyric synthesis needs a large generative model (ACE-Step, YuE…)
   running on a GPU. Sonora is the CPU-only, zero-dependency, unlimited
   alternative — and a vocals engine can be added behind the same arranger.
-* **CPU cost.** Roughly 0.5–1× realtime on two cores: a 2:40 song takes about
-  90 seconds. With `SONORA_SAMPLES=1` it is several times faster.
+* **CPU cost.** About 0.25× realtime on two cores: a 2:59 song renders in ~40 s.
+  With `SONORA_SAMPLES=1` it is several times faster still.
+* **Memory.** Roughly 4 bytes per sample per channel plus headroom — a three
+  minute stereo mix peaks around 900 MB of RSS. Everything streams in blocks,
+  but a 5 minute `--shape epic` render wants about 2 GB.
 * Quality is "good demo / strong sync brief" rather than "Grammy master".
   It is a synthesiser, not a mixing engineer.
 
