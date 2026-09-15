@@ -560,9 +560,17 @@ def automation(p: dict, n: int) -> np.ndarray:
             g[i0:i0 + k] = np.linspace(float(prev), float(target), k).astype(np.float32)
         if i1 - i0 - k > 0:
             g[i0 + k:i1] = target
-    # smooth so the level moves like a fader, not a switch
-    ker = np.ones(fade, dtype=np.float32) / fade
-    return np.convolve(g, ker, mode="same").astype(np.float32)
+    # smooth so the level moves like a fader, not a switch (running mean,
+    # kept in float32 -- np.convolve would promote this to 67 MB of float64)
+    c = np.cumsum(g, dtype=np.float64)
+    sm = np.empty(n, dtype=np.float32)
+    half = fade // 2
+    for i in range(0, n, 1 << 16):
+        j = min(n, i + (1 << 16))
+        a = np.clip(np.arange(i, j) - half, 0, n - 1).astype(np.int64)
+        b = np.clip(np.arange(i, j) + half, 0, n - 1).astype(np.int64)
+        sm[i:j] = ((c[b] - c[a]) / np.maximum(1, b - a)).astype(np.float32)
+    return sm
 
 
 def render(p: dict, progress=None) -> np.ndarray:

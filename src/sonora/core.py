@@ -485,14 +485,24 @@ def make_ir(seconds=2.2, decay=2.2, predelay=0.012, size=1.0, damping=0.55,
     return (ir / (np.max(np.abs(ir)) + 1e-9)).astype(FLOAT)
 
 
-def _conv(x2, ir):
+def _conv(x2, ir, block: int = 1 << 18):
+    """stereo convolution by overlap-add.
+
+    fftconvolve() on a three minute stem needs a 2^24 point transform -- about
+    270 MB per temporary -- which kills small machines.  Blocking it keeps the
+    peak allocation at a few MB and is usually faster too.
+    """
     from scipy.signal import fftconvolve
     x2 = ensure2(x2)
-    n = x2.shape[0]
-    out = np.zeros((n, 2), dtype=np.float64)
-    for ch in range(2):
-        out[:, ch] = fftconvolve(x2[:, ch].astype(np.float64),
-                                 ir[:, ch % ir.shape[1]].astype(np.float64))[:n]
+    n, m = x2.shape[0], ir.shape[0]
+    out = np.zeros((n + m, 2), dtype=np.float64)
+    irs = [np.ascontiguousarray(ir[:, ch % ir.shape[1]], dtype=np.float64) for ch in range(2)]
+    step = max(block, m)
+    for start in range(0, n, step):
+        end = min(n, start + step)
+        for ch in range(2):
+            seg = fftconvolve(x2[start:end, ch].astype(np.float64), irs[ch])
+            out[start:start + seg.shape[0], ch] += seg
     return out
 
 
@@ -667,22 +677,29 @@ def _k_weight(x):
 
 
 def lufs(x):
-    """integrated loudness with the BS.1770 absolute + relative gates"""
+    """integrated loudness with the BS.1770 absolute + relative gates.
+
+    Works one channel at a time so a three minute song never needs a
+    second full-length float64 copy of the mix.
+    """
     x = ensure2(x)
     n = x.shape[0]
     win, hop = sec(0.4), sec(0.1)
     if n < win:
         return -70.0
-    y = np.stack([_k_weight(x[:, 0]), _k_weight(x[:, 1])], 1)
-    ms = np.array([np.mean(y[i - win:i] ** 2) for i in range(win, n, hop)])
+    ms = np.zeros((n - win + hop) // hop, dtype=np.float64)
+    for ch in range(2):
+        y = _k_weight(x[:, ch])
+        for i, k in enumerate(range(win, n, hop)):
+            ms[i] += np.mean(y[k - win:k] ** 2)
+    ms *= 0.5
     if ms.size == 0:
         return -70.0
     loud = -0.691 + 10.0 * np.log10(np.maximum(ms, 1e-12))
-    keep = loud > -70.0                      # absolute gate
+    keep = loud > -70.0
     if not np.any(keep):
         return -70.0
-    rel = loud[keep].mean() - 10.0           # relative gate
-    keep &= loud > rel
+    keep &= loud > (loud[keep].mean() - 10.0)
     if not np.any(keep):
         return -70.0
     return float(-0.691 + 10.0 * np.log10(ms[keep].mean() + 1e-12))
