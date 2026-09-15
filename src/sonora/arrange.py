@@ -69,6 +69,13 @@ STYLES: dict[str, dict] = {
         arp="kalimba", keys="", strings=True, choir=True, bells=True,
         perc="shaker", ir="hall", rev=0.34, sidechain=1.0, lufs=-11.5, width=1.10,
         desc="harp, kalimba, handpan, flute and strings over live-feeling drums"),
+    "techno-rave": dict(
+        bpm=(138, 150), scale="minor", prog="edm", kit="rave", drum="rave",
+        bass="acid", bass_rhythm="acid", pad="wide_pad", lead="supersaw",
+        arp="stab", keys="", strings=False, choir=False, bells=False,
+        perc="shaker", ir="hall", rev=0.20, sidechain=7.5, lufs=-7.5, width=1.10,
+        glue=0.72, air=1.35, punch=1.20, drop_break=True, post_auto=True,
+        desc="four-on-the-floor, offbeat open hats, 303 acid line, hoover drops"),
     "gospel-soul": dict(
         bpm=(74, 88), scale="major", prog="soul", kit="acoustic", drum="ballad",
         bass="moog_bass", bass_rhythm="push", pad="organ_pad", lead="choir_lead",
@@ -92,6 +99,9 @@ ARRANGEMENTS: dict[str, list[tuple[str, int, float]]] = {
     ],
     "short": [("intro", 4, 0.25), ("verse", 8, 0.5), ("chorus", 8, 0.9),
               ("verse", 8, 0.6), ("chorus", 8, 1.0), ("outro", 4, 0.25)],
+    "rave": [("intro", 8, 0.45), ("verse", 8, 0.62), ("pre", 8, 0.74),
+             ("chorus", 8, 1.00), ("bridge", 8, 0.30), ("pre", 8, 0.80),
+             ("chorus", 8, 1.00), ("verse", 8, 0.86), ("outro", 8, 0.42)],
     "epic": [("intro", 8, 0.2), ("verse", 8, 0.45), ("pre", 8, 0.65),
              ("chorus", 8, 0.9), ("verse", 8, 0.5), ("pre", 8, 0.7),
              ("chorus", 8, 1.0), ("bridge", 8, 0.35), ("chorus", 8, 1.0),
@@ -217,14 +227,15 @@ class Cache:
 
 
 def _drum_variant(style: str, energy: float, name: str) -> str:
+    rave = style == "rave"
     if name == "bridge":
         return "none" if energy < 0.45 else "break"
-    if name == "intro" or name == "outro":
-        return "none"
+    if name in ("intro", "outro"):
+        return "rave_intro" if rave else "none"
     if energy < 0.5:
-        return "lofi" if style in ("lofi", "ballad") else "pop"
+        return "pop"
     if energy < 0.7:
-        return style if style in ("trap", "epic") else "pop"
+        return style if style in ("trap", "epic", "rave", "edm") else "pop"
     return style
 
 
@@ -242,6 +253,16 @@ def render_drums(p: dict, sec: dict, cache: Cache) -> np.ndarray:
         if sec["energy"] < 0.5:
             evs = [e for e in evs if e[1] not in ("snare", "clap", "crash") or
                    (int((e[0] / p["spb"]) % 4) == 2)]
+        if sec["name"] == "pre" and sec["bars"] >= 4:
+            # the build: 8th notes for a bar, then 16ths, climbing in velocity
+            spb, step = p["spb"], p["spb"] / 4.0
+            for bar in (sec["bars"] - 2, sec["bars"] - 1):
+                div = 2 if bar == sec["bars"] - 2 else 1
+                n_hits = int(round(4 * spb / (step * div)))
+                for k in range(n_hits):
+                    evs.append((bar * 4 * spb + k * step * div, "snare",
+                                0.3 + 0.7 * (k / max(1, n_hits - 1)) ** 1.5))
+            evs.sort()
         y = D.render_pattern(evs, kit=st["kit"], length=sec["dur"], tail=2.5,
                              room=0.10, seed=p["seed"])
         y = M.stem_fx(y, hp=26.0, comp=(-14.0, 2.2, 0.006, 0.09), sat=0.12,
@@ -268,6 +289,8 @@ def render_bass(p: dict, sec: dict, cache: Cache) -> np.ndarray:
     st = p["st"]
     if not st["bass"]:
         return None
+    if st.get("drop_break") and sec["name"] == "bridge" and sec["energy"] < 0.45:
+        return None          # breakdown: no bass, so the drop has somewhere to go
     out = np.zeros((C.sec(sec["dur"] + 2.0), 2), dtype=np.float32)
     preset = st["bass"]
     drop = -36 if preset in ("808bass", "reese") else -24
@@ -277,7 +300,10 @@ def render_bass(p: dict, sec: dict, cache: Cache) -> np.ndarray:
         pat = T.rhythm(st["bass_rhythm"], bar, seed=p["seed"] + bar)
         for (off, durn, vel) in pat:
             nt = root
-            if st["bass_rhythm"] in ("arp8", "offbeat", "push", "syncop"):
+            if st["bass_rhythm"] == "acid":
+                seq = [0, 0, 12, 0, 7, 0, 12, 3, 0, 12, 0, 7, 12, 0, 7, 10]
+                nt = root + seq[int(round(off * 4)) % len(seq)]
+            elif st["bass_rhythm"] in ("arp8", "offbeat", "push", "syncop"):
                 idx = int(off * 2) % len(chord)
                 nt = root + [0, 7, 12, 7][idx % 4]
             dur = durn * p["spb"]
@@ -355,6 +381,8 @@ def render_arp(p: dict, sec: dict, cache: Cache) -> np.ndarray:
     st = p["st"]
     if not st.get("arp"):
         return None
+    if st.get("drop_break") and sec["name"] == "bridge" and sec["energy"] < 0.45:
+        return None          # breakdown: pad + riser only
     if st["arp"] == "kalimba":
         fn = lambda nt, dur, **k: W.kalimba(nt, dur, **k)
     else:
@@ -368,6 +396,8 @@ def render_arp(p: dict, sec: dict, cache: Cache) -> np.ndarray:
         for s in range(16):
             if sec["energy"] < 0.5 and s % 2:
                 continue
+            if st["arp"] == "stab" and s % 2 == 0:
+                continue          # rave stabs live on the offbeat
             nt = pool[s % len(pool)]
             dur = step * 1.6
             key = ("arp", st["arp"], nt, round(dur, 3))
@@ -539,7 +569,8 @@ LAYERS = [("drums", render_drums, 0.0), ("bass", render_bass, 0.0),
           ("perc", render_perc, 0.14), ("fx", render_fx, 0.22)]
 
 
-def automation(p: dict, n: int) -> np.ndarray:
+def automation(p: dict, n: int, depth: float = -11.0,
+               exp: float = 1.25) -> np.ndarray:
     """macrodynamics: quiet sections are actually quieter.
 
     Without this the compressor flattens verse and chorus into the same
@@ -548,7 +579,7 @@ def automation(p: dict, n: int) -> np.ndarray:
     g = np.ones(n, dtype=np.float32)
     fade = max(1, C.sec(0.6))
     for sec in p["sections"]:
-        db = -11.0 * (1.0 - float(sec["energy"])) ** 1.25
+        db = depth * (1.0 - float(sec["energy"])) ** exp
         i0, i1 = C.sec(sec["start"]), C.sec(sec["start"] + sec["dur"])
         i0, i1 = min(i0, n), min(i1, n)
         if i1 <= i0:
@@ -609,10 +640,14 @@ def render(p: dict, progress=None) -> np.ndarray:
     cache.d.clear()          # rendered stems can be hundreds of MB
     _mem("stems mixed")
 
-    # macrodynamics before the bus processing so the master glue works with it
-    a = automation(p, mix.shape[0])
-    _mem("automation")
-    mix = (mix.astype(np.float32) * a[:, None])
+    # macrodynamics.  Most styles set them before the bus so the glue works
+    # with them; dance styles (post_auto) ride the fader after the master so
+    # the limiter cannot squash the breakdown back up to the level of the drop.
+    post = bool(st.get("post_auto"))
+    if not post:
+        a = automation(p, mix.shape[0])
+        _mem("automation")
+        mix = (mix.astype(np.float32) * a[:, None])
 
     # sidechain: duck everything above 120 Hz against the kick
     if st["sidechain"] > 0.1:
@@ -636,7 +671,15 @@ def render(p: dict, progress=None) -> np.ndarray:
     import os
     if os.environ.get("SONORA_DEBUG"):
         C.write(os.environ["SONORA_DEBUG"], mix)
-    mix = M.master(mix, target_lufs=st["lufs"], width=st["width"])
+    mix = M.master(mix, target_lufs=st["lufs"], width=st["width"],
+                  glue=st.get("glue", 1.0), air=st.get("air", 1.0),
+                  punch=st.get("punch", 1.0))
+    if post:
+        a = automation(p, mix.shape[0], depth=st.get("auto_depth", -11.5), exp=1.15)
+        for i in range(0, mix.shape[0], 1 << 18):
+            j = min(mix.shape[0], i + (1 << 18))
+            mix[i:j] *= a[i:j, None]
+        del a
     _mem("master")
     end = C.sec(total + 2.2)
     return C.fade(mix[:end], 0.02, 1.6)

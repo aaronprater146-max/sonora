@@ -49,7 +49,7 @@ def main() -> int:
     ap.add_argument("--key", default=None, help="tonic, e.g. Am / C / F# / 57")
     ap.add_argument("--bpm", type=float, default=None)
     ap.add_argument("--seed", type=int, default=None, help="any integer; same seed = same song")
-    ap.add_argument("--shape", default="default", choices=["default", "short", "epic"])
+    ap.add_argument("--shape", default="default", choices=["default", "short", "epic", "rave"])
     ap.add_argument("--out", default="song.wav", help=".wav, .flac or .ogg")
     ap.add_argument("--sr", type=int, default=48000)
     ap.add_argument("--quiet", action="store_true")
@@ -65,6 +65,8 @@ def main() -> int:
     seed = args.seed if args.seed is not None else random.randrange(1, 10 ** 9)
     if args.key is None:
         args.key = ["Am", "Cm", "Dm", "Em", "Fm", "Gm", "C", "A", "E", "F#"][seed % 10]
+    if args.shape == "default" and args.style in ("techno-rave", "edm-festival"):
+        args.shape = "rave"
     tonic = parse_key(args.key)
     t0 = time.time()
     p = A.plan(args.style, seed=seed, tonic=int(round(tonic)) if not isinstance(tonic, int) else tonic,
@@ -82,6 +84,13 @@ def main() -> int:
 
     C.write(args.out, y, sr=args.sr)
     if not args.quiet:
+        try:
+            from . import feel
+        except Exception:
+            import importlib, sys, os
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+            from sonora import feel
+        print("   " + feel.report(y, p["bpm"]))
         print(f"\nwrote {args.out}   {M.report(y)}")
         print(f"rendered in {time.time()-t0:.1f}s")
         print(f"seed {seed} -- reuse it with --seed {seed} to get this exact song again")

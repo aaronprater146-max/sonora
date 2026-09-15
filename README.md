@@ -25,6 +25,7 @@ That is the whole thing. Run it as many times as you want; each run is free.
 
 | style | bpm | what it is |
 |---|---|---|
+| `techno-rave` | 138–150 | four-on-the-floor, offbeat open hats, 303 acid line, hoover drops |
 | `cinematic-pop` | 84–96 | hybrid orchestral / modern pop, trailer-friendly |
 | `trap-dark` | 68–78 | 808s, fast hats, choir tops |
 | `edm-festival` | 124–130 | supersaws, offbeat bass, heavy pumping |
@@ -57,7 +58,10 @@ Output formats: `.wav` (24-bit), `.flac`, `.ogg`.
 src/sonora/
   core.py        DSP: oscillators, filters, reverbs, compressors, loudness
   theory.py      scales, chords, voice-leading, motifs, rhythm templates
-  arrange.py     10 styles, section planner, stem rendering, the mix
+  arrange.py     11 styles, section planner, stem rendering, the mix
+  feel.py        rhythm analysis -- onset rate, kick grid, so "is this
+                 actually a song or one long note?" is a measurement,
+                 not an opinion
   master.py      bus processing and loudness
   sampler.py     plays the sample library
   instruments/
