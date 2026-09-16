@@ -25,6 +25,7 @@ That is the whole thing. Run it as many times as you want; each run is free.
 
 | style | bpm | what it is |
 |---|---|---|
+| `industrial-rock` | 80–88 | static synths, glitched edits, tight dry drums |
 | `techno-rave` | 138–150 | four-on-the-floor, offbeat open hats, 303 acid line, hoover drops |
 | `cinematic-pop` | 84–96 | hybrid orchestral / modern pop, trailer-friendly |
 | `trap-dark` | 68–78 | 808s, fast hats, choir tops |
@@ -58,7 +59,9 @@ Output formats: `.wav` (24-bit), `.flac`, `.ogg`.
 src/sonora/
   core.py        DSP: oscillators, filters, reverbs, compressors, loudness
   theory.py      scales, chords, voice-leading, motifs, rhythm templates
-  arrange.py     11 styles, section planner, stem rendering, the mix
+  arrange.py     12 styles, section planner, stem rendering, the mix
+  ears.py        the analysis library: loudness, rhythm, melody, harmony,
+                 texture, structure -- see the three tools below
   feel.py        rhythm analysis -- onset rate, kick grid, so "is this
                  actually a song or one long note?" is a measurement,
                  not an opinion
@@ -160,3 +163,63 @@ one is free to use for anything, commercial included (CC0).
 
 Code: MIT. Generated samples and songs: CC0 (public domain).
 No third-party audio, models or data are used anywhere.
+
+## The three analysis tools
+
+Generated music hides its faults in the mix.  These are for finding them, and
+for taking apart a reference track you want to sound like.
+
+### 1. analyze -- understand a song
+
+    python3 tools/analyze.py song.mp3
+
+```
+  song.mp3
+  120s window (measured at 19-139s)   83 bpm   D# minor   -13.8 LUFS   crest 10.7 dB
+
+  [  ok  ] melody moves 1.6 notes/s
+          range 19 semitones, held 0.21s a note
+  [  ok  ] rhythmic: 8.4 onsets/s
+  [  ok  ] arrangement breathes (8.1 dB)
+  [  ok  ] dynamics intact (crest 10.7 dB)
+```
+
+Four checks: **melody** (does the pitch actually move?), **rhythm** (how many
+transients per second), **arrangement** (is there any contrast between
+sections?), **dynamics** (crest factor -- is the limiter doing all the work?).
+`--fail` exits non-zero if any check fails, so you can batch-filter renders.
+A sustained pad scores **under 0.6 notes/s** and is reported as
+`FAIL: no melody -- this is a sustained note`.  That is the most useful number
+here, and it is the one that caught our own output.
+
+### 2. split -- hear each instrument
+
+    python3 tools/split.py song.mp3 --out /tmp/stems
+
+Writes `kick`, `snare`, `hats`, `percussive`, `harmonic`, `texture` and
+`tonal` as separate FLACs, using harmonic/percussive separation plus a band
+split and a tonal/noise split.  No model downloads, no weights, no GPU.
+
+### 3. mimic -- describe an instrument well enough to rebuild it
+
+    python3 tools/mimic.py /tmp/stems/kick.flac
+    python3 tools/mimic.py /tmp/stems/tonal.flac
+
+Measures a drum (fundamental, pitch sweep, ring, click, noise ratio) or a tone
+(pitch, harmonic series, wave shape, filter cutoff, envelope, drive) and prints
+a Sonora preset you can paste straight into `synth.py` or the drum kit.
+
+There is also `tools/stems.py`, which renders Sonora's *own* layers
+separately.  That is what found the bug this release fixes: the pad was
+sitting level with the drums and 2.6 dB above the lead, so all you could
+hear was the wash.
+
+## Known limits
+
+* Tempo is estimated from the onset envelope and can land on the wrong octave
+  for sparse arrangements.  It is reliable on a dense, loud section.
+* `split` is harmonic/percussive separation, not source separation -- it will
+  not peel a vocal out of a full mix.  It needs roughly 2 GB of RAM for a
+  four-minute song; pass `--window 60` on a small machine.
+* `mimic` measures what it hears.  A drum's ring lives in the harmonic stem,
+  so measure the original mix if you want the decay.
