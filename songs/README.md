@@ -28,9 +28,20 @@ Reproduce exactly:
 ## Drum-only tracks
 
 `submerged.flac` is drums and percussion and nothing else -- no pad, no bass,
-no lead.  Every hit is damaged individually by `C.mangle`: reversed, pitched up
-or down, bit-crushed, ring-modulated or cut short, with the probabilities
-weighted so nothing repeats the same way twice.  Measured hit-to-hit spectral
-variation is 0.275 against 0.144 for the same kit left alone.
+no lead.
+
+The kit is a plain one-two backbeat (kick on 1 and 3, snare on 2 and 4, hats on
+eighths, with breakbeat-ish displacement and a fill every four bars in the
+driving sections).  It is **dry and gated**: reverb send is 0.05, the kit's own
+room is 0.02, and `C.gate` cuts anything that is not loud enough to earn it.
+Measured hit-to-gap level went from 20.7 dB to 49.1 dB and true silence from
+19% of the runtime to 42% -- that is the difference between hearing a drum and
+hearing a wash.
+
+The damage is an accent, not a constant.  `C.mangle` now takes a *share of hits*
+rather than a severity, and that share ramps with section energy: the intro and
+the breakdowns are clean (0%), the verses get fills, and the choruses are where
+things come apart (55%).  Like-for-like hit variation is 0.22 clean against
+0.32 damaged, while the intro measures 0.17.
 
     python3 tools/make_song.py --style destructed-drums --key 'Fm' --bpm 120 --seed 4 --out submerged.flac

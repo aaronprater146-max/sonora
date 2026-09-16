@@ -74,10 +74,11 @@ STYLES: dict[str, dict] = {
         kit="drowning", drum="drowning",
         bass="", pad="", lead="", arp="", keys="",
         strings=False, choir=False, bells=False, perc="shaker",
-        ir="room", rev=0.16, sidechain=0.0, lufs=-11.0, width=1.08,
+        ir="room", rev=0.05, sidechain=0.0, lufs=-11.0, width=1.06,
         glue=0.50, air=0.90, punch=1.35, tilt=0.0,
-        mix=dict(drums=0.0, perc=-2.0, fx=2.0),
-        destroy=1.0, drop_break=True, post_auto=True, auto_depth=-8.5,
+        mix=dict(drums=0.0, perc=-6.0, fx=-3.0),
+        gate=0.17, room=0.02, fill_every=4,
+        destroy=0.55, drop_break=True, post_auto=True, auto_depth=-8.5,
         desc="drums only, every hit damaged differently: crushed, ring-modulated, reversed"),
     "industrial-rock": dict(
         bpm=(80, 88), scale="minor", prog="cinematic", kit="industrial",
@@ -292,7 +293,8 @@ def render_drums(p: dict, sec: dict, cache: Cache) -> np.ndarray:
     y = cache.get(key)
     if y is None:
         evs = D.pattern(variant, bars=sec["bars"], bpm=p["bpm"],
-                        seed=p["seed"] + sec["index"], fill_every=8 if sec["bars"] >= 8 else 4)
+                        seed=p["seed"] + sec["index"],
+                        fill_every=st.get("fill_every", 8 if sec["bars"] >= 8 else 4))
         # thin the kit out at low energy
         if sec["energy"] < 0.5:
             evs = [e for e in evs if e[1] not in ("snare", "clap", "crash") or
@@ -308,14 +310,17 @@ def render_drums(p: dict, sec: dict, cache: Cache) -> np.ndarray:
                                 0.3 + 0.7 * (k / max(1, n_hits - 1)) ** 1.5))
             evs.sort()
         y = D.render_pattern(evs, kit=st["kit"], length=sec["dur"], tail=2.5,
-                             room=0.10, seed=p["seed"])
+                             room=st.get("room", 0.10), seed=p["seed"])
         y = M.stem_fx(y, hp=26.0, comp=(-14.0, 2.2, 0.006, 0.09), sat=0.12,
                       width=1.02, gain_db=-5.0)
+        if st.get("gate"):
+            y = C.gate(y, thresh=st["gate"])
         if st.get("destroy"):
-            # more damage where the record is loudest: the drops are the
-            # parts that should sound like the machine is coming apart
-            amt = st["destroy"] * (0.55 + 0.45 * float(sec["energy"]))
-            y = C.mangle(y, seed=p["seed"] + sec["index"] * 17, amount=amt)
+            # nothing is damaged below verse energy: you have to be able
+            # to hear the drum before you can hear it being destroyed
+            ramp = max(0.0, (float(sec["energy"]) - 0.58) / 0.42) ** 1.2
+            y = C.mangle(y, seed=p["seed"] + sec["index"] * 17,
+                         amount=st["destroy"] * ramp)
         cache.put(key, y)
     return y
 

@@ -910,6 +910,37 @@ def varispeed(y: np.ndarray, semis: float) -> np.ndarray:
     return (y[i0] * (1.0 - f) + y[i1] * f).astype(FLOAT)
 
 
+def gate(y: np.ndarray, thresh: float = 0.16, hold: float = 0.03,
+         release: float = 0.045) -> np.ndarray:
+    """Hard gate: nothing sounds unless it is loud enough to earn it.
+
+    Instant open, ramped close.  This is what takes a kit from washy to
+    tight -- tails get cut, the gaps between hits go properly silent, and you
+    hear the drum instead of the room it was recorded in.
+    """
+    m = np.asarray(mono(y), dtype=FLOAT)
+    env = np.abs(filt_env(m, 80.0, 0.7, "lp")).astype(np.float32)
+    pk = float(env.max())
+    if pk < 1e-6:
+        return y
+    env /= pk
+    n = env.size
+    ar = np.arange(n, dtype=np.int32)
+    last = np.where(env > thresh, ar, np.int32(-10000000))
+    np.maximum.accumulate(last, out=last)         # when did it last open
+    g = ((ar - last) < int(hold * SR)).astype(np.float32)
+    del last, ar, env
+    w = max(2, int(release * SR))
+    # forward-looking running mean: ramps the close without slowing the
+    # attack, because the moment the gate opens the next w samples are open
+    c = np.concatenate(([0.0], np.cumsum(g, dtype=np.float64)))
+    lo = np.arange(n)
+    hi = np.clip(lo + w, 0, n - 1)
+    g = ((c[hi] - c[lo]) / np.maximum(1, hi - lo)).astype(np.float32)
+    del c, lo, hi
+    return (np.asarray(y, dtype=FLOAT) * g[:, None]).astype(FLOAT)
+
+
 def mangle(y: np.ndarray, seed: int = 1, amount: float = 1.0) -> np.ndarray:
     """Damage every hit differently.
 
@@ -918,6 +949,8 @@ def mangle(y: np.ndarray, seed: int = 1, amount: float = 1.0) -> np.ndarray:
     bit-crushed, ring-modulated or cut short.  Nothing repeats the same way
     twice, which is the difference between "processed" and "destroyed".
     """
+    # amount is the share of hits that get damaged.  A record where every
+    # hit is mangled is just noise, and you cannot hear the drum.
     if amount <= 0.01:
         return y
     from .feel import onsets                      # lazy: feel imports core
@@ -936,17 +969,21 @@ def mangle(y: np.ndarray, seed: int = 1, amount: float = 1.0) -> np.ndarray:
             out[a:b] = y[a:b]
             continue
         seg = y[a:b]
+        if r.random() > amount:        # most hits stay clean and readable
+            out[a:b] = seg
+            del seg
+            continue
         u = r.random(5)
-        if u[0] < 0.15 * amount:                                   # backwards
+        if u[0] < 0.15:                                            # backwards
             seg = np.ascontiguousarray(seg[::-1])
-        if u[1] < 0.58 * amount:                                   # detuned hit
+        if u[1] < 0.58:                                            # detuned hit
             seg = varispeed(seg, float(r.uniform(-12.0, 12.0)))
-        if u[2] < 0.72 * amount:                                   # crushed
+        if u[2] < 0.72:                                            # crushed
             seg = bitcrush(seg, int(r.integers(2, 8)), int(r.integers(1, 6)))
-        if u[3] < 0.34 * amount:                                   # metallic
+        if u[3] < 0.34:                                            # metallic
             seg = ringmod(seg, float(r.uniform(30.0, 2600.0)),
                           float(r.uniform(0.25, 0.75)))
-        if u[4] < 0.33 * amount:                                   # cut short
+        if u[4] < 0.33:                                            # cut short
             k = max(32, int(seg.shape[0] * float(r.uniform(0.12, 0.6))))
             seg = seg[:k]
         if seg.shape[0] >= b - a:
