@@ -263,7 +263,15 @@ def hit(name: str, **kw) -> np.ndarray:
            "clap": -2.5, "tom": -3.0, "shaker": -7.0, "tamb": -6.0,
            "cowbell": -6.0, "rim": -7.0, "crash": -5.0, "ride": -7.5,
            "taiko": -1.0}
-    return calibrate(f(**kw), bal.get(name, -4.0), perc=100.0)
+    # not every drum takes the same arguments (cowbell has no seed, rim has no
+    # tone), so hand each one only the keywords it actually declares
+    import inspect
+    try:
+        want = set(inspect.signature(f).parameters)
+    except (TypeError, ValueError):
+        want = set(kw)
+    return calibrate(f(**{k: v for k, v in kw.items() if k in want}),
+                     bal.get(name, -4.0), perc=100.0)
 
 
 KITS = {
@@ -295,6 +303,15 @@ KITS = {
              "snare": dict(tune=195, decay=0.16, wires=0.5, crack=0.5, room=0.35),
              "rim": dict(),
              "hat": dict(tone=0.85, level=0.55)},
+    # tight, dry and close -- no tails, nothing washy.  "focused"
+    "industrial": {"kick": dict(tune=38, decay=0.24, punch=1.0, click=0.85, sub=0.38),
+                   "snare": dict(tune=198, decay=0.10, wires=0.62, crack=1.0, room=0.06),
+                   "hat": dict(tone=1.22, level=0.42),
+                   "openhat": dict(tone=1.26, level=0.30),
+                   "rim": dict(),
+                   "cowbell": dict(),
+                   "tom": dict(tune=122),
+                   "crash": dict(decay=1.1)},
     "rave": {"kick": dict(tune=34, decay=0.42, punch=0.95, click=0.65, sub=0.55),
              "snare": dict(tune=215, decay=0.12, wires=0.9, crack=1.0, room=0.10),
              "clap": dict(decay=0.16),
@@ -376,6 +393,20 @@ STYLE_GRIDS = {
         "hat": "x.x.x.x.x.x.x.x.",
         "crash": "x...............",
     },
+    "industrial": {"kick": "x..x..x...x.x...",
+                   "snare": "....x.......x...",
+                   "hat": "..g...g...g...g.",
+                   "rim": "......o.....o...",
+                   "crash": "x..............."},
+    "industrial_drive": {"kick": "x..x..x.x.x.x..o",
+                         "snare": "....x.......x.g.",
+                         "hat": "x.g.x.g.x.g.x.g.",
+                         "openhat": "............o...",
+                         "cowbell": "..............x.",
+                         "crash": "x..............."},
+    "industrial_intro": {"kick": "x.......x.......",
+                         "hat": "..g...g...g...g.",
+                         "rim": "....o.......o..."},
     "rave": {
         "kick": "x...x...x...x...",
         "clap": "....x.......x...",

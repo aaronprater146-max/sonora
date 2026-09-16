@@ -19,7 +19,8 @@ MONO_FLOOR = 0.22   # minimum acceptable L/R correlation once the mix is widened
 
 def master(x: np.ndarray, target_lufs: float = -11.0, glue: float = 1.0,
            width: float = 1.12, air: float = 1.0, punch: float = 1.0,
-           ceil_db: float = -1.0, low_cut: float = 18.0) -> np.ndarray:
+           ceil_db: float = -1.0, low_cut: float = 18.0,
+           tilt: float = 0.0) -> np.ndarray:
     x = ensure2(x).astype(FLOAT)
     # 1. clean up rumble that only eats headroom
     x = highpass(x.astype(FLOAT), low_cut, 0.707).astype(FLOAT)
@@ -32,6 +33,8 @@ def master(x: np.ndarray, target_lufs: float = -11.0, glue: float = 1.0,
     x = high_shelf(x.astype(FLOAT), 7000.0, -0.5 * air, 0.7).astype(FLOAT)
     x = lowpass(x.astype(FLOAT), 19000.0, 0.707).astype(FLOAT)
     x = tilt_eq(x.astype(FLOAT), 0.3 * air).astype(FLOAT)
+    if abs(tilt) > 0.01:      # per-style overall tilt: -2 dB is noticeably darker
+        x = tilt_eq(x.astype(FLOAT), tilt).astype(FLOAT)
     # 3. glue
     x = compressor(x.astype(FLOAT), -20.0, 1.0 + 1.6 * glue, 0.018, 0.16,
                    knee=10.0, makeup=1.5 * glue).astype(FLOAT)

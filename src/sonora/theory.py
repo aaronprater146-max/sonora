@@ -27,6 +27,21 @@ def name(m: int) -> str:
     return f"{NOTE_NAMES[int(m) % 12]}{int(m) // 12 - 1}"
 
 
+def parse_key(k: str) -> int:
+    """'Am' -> 57, 'C' -> 48, 'F#' -> 54, '57' -> 57 -- the mode suffix is
+    ignored, it only picks the tonic; the style decides major or minor."""
+    k = k.strip()
+    if k.lstrip("-").isdigit():
+        return int(k)
+    letter = k[0].upper()
+    acc = 0
+    if len(k) > 1 and k[1] == "#":
+        acc = 1
+    elif len(k) > 1 and k[1] == "b":
+        acc = -1
+    return 12 * 4 + (NOTE_NAMES.index(letter) + acc) % 12
+
+
 SCALES = {
     "major": [0, 2, 4, 5, 7, 9, 11],
     "minor": [0, 2, 3, 5, 7, 8, 10],

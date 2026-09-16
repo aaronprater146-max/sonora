@@ -69,6 +69,19 @@ STYLES: dict[str, dict] = {
         arp="kalimba", keys="", strings=True, choir=True, bells=True,
         perc="shaker", ir="hall", rev=0.34, sidechain=1.0, lufs=-11.5, width=1.10,
         desc="harp, kalimba, handpan, flute and strings over live-feeling drums"),
+    "industrial-rock": dict(
+        bpm=(80, 88), scale="minor", prog="cinematic", kit="industrial",
+        drum="industrial", bass="distorted_bass", bass_rhythm="push",
+        pad="static_bed", lead="glitch_lead", arp="", keys="bend_guitar",
+        strings=False, choir=False, bells=False, perc="",
+        ir="room", rev=0.11, sidechain=2.5, lufs=-11.0, width=1.06,
+        glue=0.55, air=0.75, punch=1.30, tilt=-2.5,
+        # the fix for "all I can hear is one sustained note": the pad is a
+        # bed, not a wall, and the lead sits in front of everything
+        mix=dict(pad=-12.0, lead=7.0, bass=9.0, keys=-4.0, fx=1.0),
+        stutter=True, bend=True, drop_break=True, post_auto=True,
+        auto_depth=-9.0,
+        desc="damaged static synths, glitched edits, tight dry drums"),
     "techno-rave": dict(
         bpm=(138, 150), scale="minor", prog="edm", kit="rave", drum="rave",
         bass="acid", bass_rhythm="acid", pad="wide_pad", lead="supersaw",
@@ -99,6 +112,10 @@ ARRANGEMENTS: dict[str, list[tuple[str, int, float]]] = {
     ],
     "short": [("intro", 4, 0.25), ("verse", 8, 0.5), ("chorus", 8, 0.9),
               ("verse", 8, 0.6), ("chorus", 8, 1.0), ("outro", 4, 0.25)],
+    "industrial": [("intro", 8, 0.40), ("verse", 8, 0.62), ("pre", 4, 0.74),
+                   ("chorus", 8, 1.00), ("verse", 8, 0.66), ("pre", 4, 0.78),
+                   ("chorus", 8, 1.00), ("bridge", 8, 0.32), ("pre", 4, 0.80),
+                   ("chorus", 8, 1.00), ("verse", 8, 0.70), ("outro", 8, 0.36)],
     "rave": [("intro", 8, 0.45), ("verse", 8, 0.62), ("pre", 8, 0.74),
              ("chorus", 8, 1.00), ("bridge", 8, 0.30), ("pre", 8, 0.80),
              ("chorus", 8, 1.00), ("verse", 8, 0.86), ("outro", 8, 0.42)],
@@ -227,15 +244,20 @@ class Cache:
 
 
 def _drum_variant(style: str, energy: float, name: str) -> str:
-    rave = style == "rave"
     if name == "bridge":
         return "none" if energy < 0.45 else "break"
+    if style == "industrial":
+        if name in ("intro", "outro"):
+            return "industrial_intro"
+        return "industrial_drive" if energy >= 0.72 else "industrial"
+    if style == "rave":
+        return "rave_intro" if name in ("intro", "outro") else "rave"
     if name in ("intro", "outro"):
-        return "rave_intro" if rave else "none"
+        return "none"
     if energy < 0.5:
         return "pop"
     if energy < 0.7:
-        return style if style in ("trap", "epic", "rave", "edm") else "pop"
+        return style if style in ("trap", "epic", "edm") else "pop"
     return style
 
 
@@ -357,8 +379,13 @@ def render_keys(p: dict, sec: dict, cache: Cache) -> np.ndarray:
     st = p["st"]
     if not st.get("keys"):
         return None
+    # sampled instruments when the name matches, otherwise any synth preset
     fn = {"piano": K.piano, "felt_piano": K.felt_piano, "rhodes": K.rhodes,
-          "organ": K.organ, "clav": K.clav}[st["keys"]]
+          "organ": K.organ, "clav": K.clav}.get(st["keys"])
+    if fn is None:
+        preset = st["keys"]
+        fn = lambda nt, dur, **kw: Y.note(nt, dur, preset, 0.85,
+                                          seed=p["seed"] + nt)
     out = np.zeros((C.sec(sec["dur"] + 2.5), 2), dtype=np.float32)
     bar_dur = 4 * p["spb"]
     voic = T.voicing(sec["chords"], 52, 77)
@@ -373,6 +400,8 @@ def render_keys(p: dict, sec: dict, cache: Cache) -> np.ndarray:
                 C.mix_at(out, y, bar * bar_dur + off * p["spb"] + i * 0.007,
                          gain=0.5 * vel * (0.65 if i else 1.0),
                          p=float((i - len(notes) / 2) * 0.11))
+    if st.get("bend"):
+        out = C.bend(out, semis=0.75, rate=2.2)
     return M.stem_fx(out, hp=45.0, lp=11000.0, comp=(-18.0, 1.8, 0.02, 0.2), sat=0.06,
                      width=1.08, gain_db=-7.0)
 
@@ -440,6 +469,9 @@ def render_lead(p: dict, sec: dict, cache: Cache) -> np.ndarray:
                                                       seed=p["seed"] + nt))
                 gain = 0.5
             C.mix_at(out, y, bar * bar_dur + off, gain=gain, p=0.12)
+    if st.get("stutter"):
+        out = C.stutter(out, p["spb"] / 4.0, seed=p["seed"] + sec["index"] + 91,
+                       drop=0.14, chop=0.12)
     return M.stem_fx(out, hp=200.0, lp=11000.0, comp=(-16.0, 2.4, 0.015, 0.15), sat=0.1,
                      width=1.05, gain_db=-5.5)
 
@@ -630,6 +662,9 @@ def render(p: dict, progress=None) -> np.ndarray:
             n = min(y.shape[0], mix.shape[0] - t0)
             if n <= 0:
                 continue
+            gdb = st.get("mix", {}).get(lname, 0.0)
+            if gdb:
+                y = (y * np.float32(10.0 ** (gdb / 20.0))).astype(np.float32)
             mix[t0:t0 + n] += y[:n]
             if send > 0.001:
                 send_bus[t0:t0 + n] += C.send_reverb(y[:n], ir, send)
@@ -673,7 +708,7 @@ def render(p: dict, progress=None) -> np.ndarray:
         C.write(os.environ["SONORA_DEBUG"], mix)
     mix = M.master(mix, target_lufs=st["lufs"], width=st["width"],
                   glue=st.get("glue", 1.0), air=st.get("air", 1.0),
-                  punch=st.get("punch", 1.0))
+                  punch=st.get("punch", 1.0), tilt=st.get("tilt", 0.0))
     if post:
         a = automation(p, mix.shape[0], depth=st.get("auto_depth", -11.5), exp=1.15)
         for i in range(0, mix.shape[0], 1 << 18):

@@ -878,6 +878,47 @@ def fade(x, fin=0.005, fout=0.05):
     return x.astype(FLOAT)
 
 
+def stutter(y: np.ndarray, step_s: float, seed: int = 1,
+            drop: float = 0.22, chop: float = 0.20) -> np.ndarray:
+    """Gate a part into 16ths the way a sampler would: steps go missing or get
+    cut in half.  This is the 'glitched' in glitched guitar."""
+    n = y.shape[0]
+    step = max(16, int(step_s * SR))
+    g = np.ones(n, dtype=np.float32)
+    r = rng(seed)
+    i = 0
+    while i < n:
+        j = min(n, i + step)
+        u = float(r.random())
+        if u < drop:
+            g[i:j] = 0.0                       # step goes missing
+        elif u < drop + chop:
+            g[i:min(n, i + step // 2)] = 0.0   # only the back half sounds
+        i = j
+    # 0.5 ms ramps so it clicks like an edit, not like a bug
+    c = np.concatenate(([0.0], np.cumsum(g, dtype=np.float64)))
+    a = np.clip(np.arange(n) - 12, 0, n - 1)
+    b = np.clip(np.arange(n) + 12, 0, n - 1)
+    g = ((c[b] - c[a]) / np.maximum(1, b - a)).astype(FLOAT)
+    return (y * g[:, None]).astype(FLOAT)
+
+
+def bend(y: np.ndarray, semis: float = 0.8, rate: float = 2.5) -> np.ndarray:
+    """Varispeed pitch bend: starts `semis` sharp and settles back to pitch.
+    The cheap, convincing version of a bent guitar string."""
+    n = y.shape[0]
+    if n < 64:
+        return y
+    t = np.arange(n, dtype=np.float64) / SR
+    curve = semis * np.exp(-rate * t)
+    idx = np.cumsum(2.0 ** (curve / 12.0))
+    idx *= (n - 1) / idx[-1]
+    i0 = np.clip(idx.astype(np.int64), 0, n - 1)
+    i1 = np.minimum(i0 + 1, n - 1)
+    f = (idx - i0)[:, None].astype(FLOAT)
+    return (y[i0] * (1.0 - f) + y[i1] * f).astype(FLOAT)
+
+
 def write(path, x, sr=SR, subtype=None):
     import soundfile as sf
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
