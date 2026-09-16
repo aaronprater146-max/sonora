@@ -303,6 +303,14 @@ KITS = {
              "snare": dict(tune=195, decay=0.16, wires=0.5, crack=0.5, room=0.35),
              "rim": dict(),
              "hat": dict(tone=0.85, level=0.55)},
+    # half-time kit.  Closed hats only -- an open hat repeating every bar
+    # is the most tiring sound in programmed drums.
+    "groove": {"kick": dict(tune=32, decay=0.42, punch=0.95, click=0.55, sub=0.80),
+               "snare": dict(tune=170, decay=0.18, wires=0.75, crack=1.0, room=0.04),
+               "hat": dict(tone=1.10, level=0.52),
+               "rim": dict(),
+               "tom": dict(tune=118),
+               "crash": dict(decay=0.9)},
     # deep, dark and slow -- built to be damaged afterwards
     "drowning": {"kick": dict(tune=33, decay=0.32, punch=1.0, click=0.7, sub=0.72),
                  "snare": dict(tune=165, decay=0.15, wires=0.8, crack=1.0, room=0.05),
@@ -404,6 +412,23 @@ STYLE_GRIDS = {
         "hat": "x.x.x.x.x.x.x.x.",
         "crash": "x...............",
     },
+    "groove": {"kick": "x.......x.......",
+               "snare": "....x.......x...",
+               "hat": "x...x.o.x...x.o.",
+               "rim": "..............o."},
+    "groove_drive": {"kick": "x.......x...x...",
+                     "snare": "....x.......x..g",
+                     "hat": "x...x.o.x...x.o.",
+                     "rim": "..o.......o.....",
+                     "tom": "............o...",
+                     "crash": "x..............."},
+    "groove_break": {"kick": "x...............",
+                     "snare": "........x.......",
+                     "hat": "x.......o.......",
+                     "rim": "............o..."},
+    "groove_intro": {"kick": "x...............",
+                     "hat": "x...x.o.x...x.o.",
+                     "rim": "..............o."},
     "drowning": {"kick": "x.......x.......",
                  "snare": "....x.......x...",
                  "hat": "..o...o...o...o.",
@@ -452,8 +477,12 @@ STYLE_GRIDS = {
 }
 
 
+CLICKS = ("hat", "ride", "tamb", "rim", "shaker")
+
+
 def pattern(style: str, bars: int = 4, bpm: float = 90.0, seed: int = 1,
-            fill_every: int = 0, variation: float = 0.25) -> list[tuple[float, str, float]]:
+            fill_every: int = 0, variation: float = 0.25,
+            swing: float = 0.0, hat_vary: float = 0.0) -> list[tuple[float, str, float]]:
     """-> list of (time_seconds, instrument, velocity)"""
     g = np.random.default_rng(seed)
     grid = STYLE_GRIDS.get(style, STYLE_GRIDS["pop"])
@@ -470,10 +499,18 @@ def pattern(style: str, bars: int = 4, bpm: float = 90.0, seed: int = 1,
                     continue
                 vel = {"x": 1.0, "o": 0.72, "g": 0.42}[ch]
                 vel *= float(1.0 + g.uniform(-variation, variation) * 0.5)
-                # hats get a swinging, human feel
-                if inst in ("hat", "openhat", "ride", "tamb") and s % 2 == 1:
-                    vel *= 0.78
-                events.append((bar * 4 * spb + s * step, inst, float(np.clip(vel, 0.15, 1.2))))
+                t = bar * 4 * spb + s * step
+                if inst in CLICKS:
+                    if s % 4 == 2 and swing:
+                        t += swing * step * 0.66      # push the "and" late
+                        vel *= 0.78
+                    if hat_vary and ch != "x":
+                        u = float(g.random())
+                        if u < hat_vary * 0.5:
+                            continue                  # sit this one out
+                        if u < hat_vary:
+                            vel *= 1.35               # lean on it instead
+                events.append((t, inst, float(np.clip(vel, 0.15, 1.2))))
         if is_fill:
             # 16th note snare/tom roll into the next bar
             for k in range(4):

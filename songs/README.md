@@ -9,6 +9,7 @@ with them, including commercially, with no attribution.
 | `nightshift.flac` | trap-dark | 2:20 | `python3 tools/make_song.py --style trap-dark --key Fm --shape short --seed 21 --out nightshift.flac` |
 | `neon.flac` | edm-festival | 1:16 | `python3 tools/make_song.py --style edm-festival --key Em --shape short --seed 5 --out neon.flac` |
 | `submerged.flac` | destructed-drums | 4:10 | `python3 tools/make_song.py --style destructed-drums --key 'Fm' --bpm 120 --seed 4 --out submerged.flac` |
+| `undertow.flac` | slow-groove | 4:10 | `python3 tools/make_song.py --style slow-groove --key 'Fm' --bpm 60 --seed 4 --out undertow.flac` |
 | `ghostyear.flac` | industrial-rock | 4:05 | `python3 tools/make_song.py --style industrial-rock --key 'D#m' --bpm 83 --seed 9 --out ghostyear.flac` |
 
 Same seed + same arguments = the same track, every time.
@@ -45,3 +46,30 @@ things come apart (55%).  Like-for-like hit variation is 0.22 clean against
 0.32 damaged, while the intro measures 0.17.
 
     python3 tools/make_song.py --style destructed-drums --key 'Fm' --bpm 120 --seed 4 --out submerged.flac
+
+## The half-time groove
+
+`undertow.flac` is `submerged` at half speed (60 bpm) with a jazz-leaning
+groove: kick on 1 and 3, snare on 2 and 4, and a swung closed-hat ride on
+1, 2, 2-and, 3, 4, 4-and.
+
+There is **no open hat anywhere** -- not in the kit, not in the grids.  An open
+hat landing on the same beat every bar is the most tiring sound in programmed
+drums.  Instead the closed hats are humanised three ways at once:
+
+* **swing** -- the eighth-note offbeats are pushed late, so the "and" of 2
+  lands at step 6.41 instead of 6.0
+* **velocity** -- downbeats sit near 1.0, offbeats near 0.55, each with ±20%
+  of random drift on top
+* **hat_vary** -- each bar independently drops some offbeats and leans on
+  others, so no two bars of hats are identical
+
+Measured on three consecutive bars:
+
+    bar 1   0.0  4.0        8.0  12.0  14.41     <- the "and" of 2 sat out
+    bar 2   0.0  4.0  6.41  8.0  12.0  14.41
+    bar 3   0.0  4.0  6.41  8.0  12.0            <- the "and" of 4 sat out
+
+The gate threshold had to come down from 0.17 to 0.11 to stop it eating the
+softer offbeat hats -- the gate is normalised to the loudest hit, and a closed
+hat is a lot quieter than a kick.

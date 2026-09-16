@@ -69,6 +69,18 @@ STYLES: dict[str, dict] = {
         arp="kalimba", keys="", strings=True, choir=True, bells=True,
         perc="shaker", ir="hall", rev=0.34, sidechain=1.0, lufs=-11.5, width=1.10,
         desc="harp, kalimba, handpan, flute and strings over live-feeling drums"),
+    "slow-groove": dict(
+        bpm=(58, 62), scale="minor", prog="cinematic",
+        kit="groove", drum="groove",
+        bass="", pad="", lead="", arp="", keys="",
+        strings=False, choir=False, bells=False, perc="",
+        ir="room", rev=0.05, sidechain=0.0, lufs=-11.0, width=1.06,
+        glue=0.50, air=0.90, punch=1.30, tilt=0.0,
+        mix=dict(drums=0.0, perc=-6.0, fx=-3.0),
+        gate=0.11, room=0.02, fill_every=4,
+        swing=0.62, hat_vary=0.45, variation=0.42,
+        destroy=0.50, drop_break=True, post_auto=True, auto_depth=-8.5,
+        desc="half-time industrial groove: swung closed hats, clicks, gated"),
     "destructed-drums": dict(
         bpm=(118, 122), scale="minor", prog="cinematic",
         kit="drowning", drum="drowning",
@@ -123,6 +135,11 @@ ARRANGEMENTS: dict[str, list[tuple[str, int, float]]] = {
     ],
     "short": [("intro", 4, 0.25), ("verse", 8, 0.5), ("chorus", 8, 0.9),
               ("verse", 8, 0.6), ("chorus", 8, 1.0), ("outro", 4, 0.25)],
+    "groove": [("intro", 4, 0.35), ("verse", 6, 0.60), ("pre", 3, 0.74),
+               ("chorus", 6, 1.00), ("verse", 6, 0.64), ("bridge", 5, 0.30),
+               ("pre", 3, 0.80), ("chorus", 6, 1.00), ("bridge", 4, 0.34),
+               ("verse", 6, 0.72), ("pre", 3, 0.84), ("chorus", 6, 0.95),
+               ("outro", 4, 0.34)],
     "drowning": [("intro", 8, 0.35), ("verse", 12, 0.60), ("pre", 6, 0.74),
                  ("chorus", 12, 1.00), ("verse", 12, 0.64), ("bridge", 10, 0.30),
                  ("pre", 6, 0.80), ("chorus", 12, 1.00), ("bridge", 8, 0.34),
@@ -260,6 +277,12 @@ class Cache:
 
 
 def _drum_variant(style: str, energy: float, name: str) -> str:
+    if style == "groove":
+        if name == "bridge":
+            return "groove_break"
+        if name in ("intro", "outro"):
+            return "groove_intro"
+        return "groove_drive" if energy >= 0.72 else "groove"
     if style == "drowning":
         # a drum record does not stop drumming for the break, it thins out
         if name == "bridge":
@@ -294,7 +317,10 @@ def render_drums(p: dict, sec: dict, cache: Cache) -> np.ndarray:
     if y is None:
         evs = D.pattern(variant, bars=sec["bars"], bpm=p["bpm"],
                         seed=p["seed"] + sec["index"],
-                        fill_every=st.get("fill_every", 8 if sec["bars"] >= 8 else 4))
+                        fill_every=st.get("fill_every", 8 if sec["bars"] >= 8 else 4),
+                        variation=st.get("variation", 0.25),
+                        swing=st.get("swing", 0.0),
+                        hat_vary=st.get("hat_vary", 0.0))
         # thin the kit out at low energy
         if sec["energy"] < 0.5:
             evs = [e for e in evs if e[1] not in ("snare", "clap", "crash") or

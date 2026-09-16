@@ -112,7 +112,7 @@ def onset_times(x: np.ndarray, sr: int = SR, **kw):
     return onsets(np.asarray(mono(x), dtype=FLOAT), **kw)
 
 
-def tempo(x: np.ndarray, sr: int = SR, lo: float = 80.0, hi: float = 160.0) -> float:
+def tempo(x: np.ndarray, sr: int = SR, lo: float = 55.0, hi: float = 160.0) -> float:
     """tempo from the onset envelope, with the octave ambiguity resolved.
 
     Half and double tempo are always strong candidates (a kick on 1 and 3 is
@@ -310,12 +310,16 @@ def structure(x: np.ndarray, sr: int = SR) -> dict:
           for i in range(0, m.size - sr // 2, sr // 2)]))
     if rms.size < 8:
         return dict(sections=[], contrast_db=0.0, repeats=0.0)
-    db = 20 * np.log10(rms + 1e-9)
-    contrast = float(db.max() - db.min())
-    # sections from the loudness contour, coarse
+    db = np.maximum(20 * np.log10(rms + 1e-9), -70.0)
+    # a gated drum record is genuinely silent between hits, and a -inf window
+    # would otherwise set the scale for everything else
+    live = db[db > -69.0]
+    if live.size < 4:
+        return dict(sections=[], contrast_db=0.0, repeats=0.0)
+    lo_p, hi_p = float(np.percentile(live, 5)), float(np.percentile(live, 95))
+    contrast = float(hi_p - lo_p)
     sm = np.convolve(db, np.ones(9) / 9, mode="same") if db.size > 9 else db
-    lab = np.digitize(sm, [db.min() + 0.33 * (db.max() - db.min()),
-                           db.min() + 0.66 * (db.max() - db.min())])
+    lab = np.digitize(sm, [lo_p + 0.33 * (hi_p - lo_p), lo_p + 0.66 * (hi_p - lo_p)])
     names = ["quiet", "mid", "loud"]
     secs, cur, i0 = [], int(lab[0]), 0
     for i in range(1, lab.size):
