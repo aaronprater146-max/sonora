@@ -128,8 +128,105 @@ exactly where the cut is supposed to land, and the trick disappears.
 
 Knobs, all on the style:
 
-    space_db=-46.0        master room: wet RMS in dBFS
+    space_db=-45.0        master room: wet RMS in dBFS, at full open
     swell=0.34            per-riff swell level
     swell_density=0.55    roughly one every four bars
-    master_swell=0.26     section-boundary swell level
     outro_tail=False      no end drone
+
+## The build is the return fader now
+
+The section-boundary swell is gone too -- `section_swells()` was deleted.
+Between 46 and 56 seconds the old record stacked a noise riser, a ghost swell
+built out of that riser, a sub boom and a crash on the downbeat of the first
+chorus, and did it again at 132 s and 208 s: three synthesised noises on every
+drop.
+
+All of it is gone, everywhere, for this style:
+
+    riser=False        no noise sweep across the pre-chorus
+    impact=False       no sub boom on the downbeat
+    chorus_crash=False no crash cymbal on the downbeat
+    outro_tail=False   no end drone
+
+(They default to `True`, so the other styles keep their builds.)
+
+What replaces it is `reverb_ride()` -- the master reverb's dry/wet, drawn as
+an arrangement decision rather than as an effect.  Almost dry at the top, it
+opens slowly across the first minute, is wide open on the downbeat of the
+first drop, and snaps shut in 120 ms.  Then it goes back to nearly dry and
+opens again, faster each time, because by then the listener knows what is
+coming.
+
+The room, measured out of the master:
+
+      0-16s   -74.7 dBFS   ####                     intro: essentially dry
+     30-40s   -48.9 dBFS   #####################    verse: opening
+     44-48s   -41.9 dBFS   ##########################
+     48-52s   -41.7 dBFS   ##########################   the swell (peak -21.8)
+     56-64s   -64.7 dBFS   ##########               snapped shut: -23 dB
+    100-112s  -72.1 dBFS   #####                    bridge: almost dry again
+    126-132s  -42.8 dBFS   #########################    quicker build
+    136-144s  -63.7 dBFS   ##########               shut
+    200-208s  -44.8 dBFS   ########################     quicker still
+    212-220s  -60.5 dBFS   #############            shut
+    232-248s  -57.7 dBFS   ##################       outro: opens and stays
+
+## The swarm
+
+A fly swarm runs under the whole record.  It is the one thing that does not
+go through the master room: it is added after the room, and it has its own,
+which is frozen.
+
+**The flies.** `instruments/swarm.py`.  Each one is a buzzing pulse train --
+six harmonics of a wingbeat between 165 and 430 Hz, plus filtered air -- and
+each wanders in pitch, drifts in distance and moves in the stereo field on its
+own smoothed random walk.  No two beats are the same, which is why a real
+swarm never sounds like a loop.  28 of them in one loop, 22 in the other.
+Nothing is sampled and nothing is downloaded: there is no recording in it to
+license, so it is CC0 the same as the rest of the library.
+
+**Seamless.** Each loop is generated `xfade` seconds longer than asked for and
+the overhang is folded back over the head, equal power, so the join measures
+quieter than a normal step between samples.  The two loops are 9.31 s and
+13.77 s -- lengths with no common measure, so the pair does not come round
+again inside four minutes.
+
+**The freeze.** Freeze is just regeneration: whatever comes out goes back in,
+a little quieter and a little darker, forever (feedback 0.985, 0.31 s round
+trip, damped each pass).  Because the input loops, the answer loops, so it is
+computed once and tiled.  Two details matter:
+
+* the room is fed one period and folded, because it is still ringing when the
+  next period starts -- that is `steady_room()`
+* the regeneration runs on **two** periods and only the second is kept.  The
+  damping filter and the chorus both need a run-up, and a run-up on a looping
+  buffer is a click at the join; generation after generation of them added up
+  to a seam you could hear (0.26 against a 99.9th-percentile step of 0.05).
+  After the fix: 0.017.
+
+**Consumed.** The dry flies fade out on exactly the curve the frozen ones fade
+in (equal power, so there is no dip in the middle), and the bed lifts a
+little on the way because it is meant to be taking over.  By 78% of the
+record the dry swarm is 5% of what it was and the freeze is everything.
+
+    fly bed, measured out of the master
+      0-20s   -51.0 dBFS   start: dry flies
+     60-76s   -47.6 dBFS
+    140-156s  -46.1 dBFS
+    200-220s  -43.7 dBFS   the freeze has taken over (+7 dB)
+    232-248s  -47.3 dBFS   outro
+
+Hit-to-gap is 43.5 dB.  It was 53.3 dB before the swarm existed and 12.6 dB
+the first time the room was levelled by peak instead of by RMS, so the drum
+is still 43 dB clear of everything underneath it.
+
+Knobs:
+
+    space_db=-45.0        master room at full open
+    ride / ride_build     the return fader; builds of 100%, 30%, 18% of each gap
+    fly_db=-57.0          the dry swarm
+    fly_freeze_db=-54.0   the swarm, frozen
+    fly_consume=0.78      when the handover finishes, as a fraction of the song
+
+The swarm is deliberately quiet -- about 34 dB under the music.  Raise
+`fly_db` toward -50 if it should be more of a feature.

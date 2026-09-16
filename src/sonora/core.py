@@ -913,6 +913,13 @@ def resample(x, ratio):
     return (x[i0] * (1 - f) + x[i0 + 1] * f).astype(FLOAT)
 
 
+def at_db(x, db: float) -> np.ndarray:
+    """scale so the RMS sits at `db` dBFS -- how you level a texture"""
+    a = np.asarray(x, dtype=np.float64)
+    r = float(np.sqrt(np.mean(a ** 2)))
+    return (a * (10.0 ** (db / 20.0) / max(r, 1e-12))).astype(FLOAT)
+
+
 def fade(x, fin=0.005, fout=0.05):
     x = np.array(np.asarray(x, dtype=np.float64), copy=True)
     a, b = sec(fin), sec(fout)

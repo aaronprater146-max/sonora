@@ -107,9 +107,18 @@ songs/           rendered songs
   room's decay runs *into* the note instead of away from it, and a tail
   becomes a swell that grows out of nothing.  Cut the swell off at its peak
   and the ear hears something reversed: it curves up and snaps back to
-  silence, leaving a ghost of the phrase behind it.  It is used per-riff
-  (built from each bar's own audio), at section boundaries (cut on the
-  downbeat of a drop), and as a whisper of a six-second room on the master.
+  silence, leaving a ghost of the phrase behind it.  It is used per-riff,
+  built from each bar's own audio.
+* **The build is the return fader.** Nothing is synthesised on top of a drop
+  -- no riser, no sub boom, no crash.  `reverb_ride()` draws the master
+  reverb's dry/wet as an arrangement decision: almost dry at the top, opening
+  slowly until it is wide open on the downbeat, then snapped shut.  The swell
+  is the room arriving and being taken away.  Measured, the room moves
+  23 dB between the build and the bar after the drop.
+* **Insects, synthesised.** `instruments/swarm.py` is a fly swarm: every fly
+  a buzzing pulse train with its own wandering pitch, distance and position,
+  summed by the dozen into a seamless loop.  CC0 by construction -- there is
+  no recording in it to license.
 * **A real master chain.** Glue compression, 3-band control, stereo width,
   bus saturation, lookahead limiting, and BS.1770-gated loudness normalisation.
 

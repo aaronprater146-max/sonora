@@ -80,11 +80,16 @@ STYLES: dict[str, dict] = {
         gate=0.11, room=0.02, fill_every=4,
         swing=0.62, hat_vary=0.45, variation=0.42,
         destroy=0.50, drop_break=True, post_auto=True, auto_depth=-8.5,
-        # the room is always there but never in front: a whisper of an
-        # endless space on the master, and the riffs get their own
-        # backwards swells instead of a noise build
-        space_db=-46.0, swell=0.34, swell_density=0.55, master_swell=0.26,
-        outro_tail=False,
+        # The room is always there but never in front.  The build is not an
+        # effect any more: it is the master return fader riding open and
+        # snapping shut (reverb_ride), so there is no riser, no sub boom and
+        # no crash piled on the downbeat.
+        space_db=-45.0, ride=True, ride_build=(1.0, 0.30, 0.18),
+        swell=0.34, swell_density=0.55,
+        riser=False, impact=False, chorus_crash=False, outro_tail=False,
+        # a swarm of flies, outside the master room and inside its own,
+        # which is frozen and slowly eats them
+        fly_db=-57.0, fly_freeze_db=-54.0, fly_consume=0.78,
         desc="half-time industrial groove: swung closed hats, clicks, gated"),
     "destructed-drums": dict(
         bpm=(118, 122), scale="minor", prog="cinematic",
@@ -346,37 +351,93 @@ def riff_swells(p: dict, sec: dict, y: np.ndarray) -> np.ndarray:
     return y
 
 
-def section_swells(p: dict, mix: np.ndarray) -> np.ndarray:
-    """The big ones: the same backwards swell, but taken from the whole mix
-    and cut on the downbeat of a drop.  This is what replaced the noise
-    build -- it is the song remembering itself, not a sweep."""
+def reverb_ride(p: dict) -> np.ndarray:
+    """The master return fader, drawn as an arrangement decision.
+
+    This is how the record builds now.  The room is almost dry at the top and
+    opens slowly across the first minute, wide open on the downbeat of the
+    first drop -- and then it snaps shut.  That is the swell: the room
+    arrives, and the room is taken away, and nothing was added to the track
+    to do it.  After that it opens again faster every time, because by then
+    the listener knows what is coming.
+    """
     st = p["st"]
-    lvl = st.get("master_swell", 0.0)
-    if lvl <= 0.01:
-        return mix
-    bar_dur = 4 * p["spb"]
-    src_dur = min(2.0 * p["spb"], 2.6)
-    sw_dur = min(2.0 * p["spb"], 2.8)
-    ir = ghost_ir(p["seed"])
-    for i, sec in enumerate(p["sections"]):
-        into_drop = i > 0 and (sec["name"] == "chorus" or sec["energy"] >= 0.95)
-        out_of_intro = i == 0 and sec["bars"] >= 2
-        if not (into_drop or out_of_intro):
+    n = C.sec(p["total"] + 5.0)
+    floor = float(st.get("ride_floor", 0.05))
+    peak = float(st.get("ride_peak", 1.0))
+    g = np.full(n, floor, dtype=np.float32)
+    drops = [s["start"] for s in p["sections"]
+             if s["index"] > 0 and (s["name"] == "chorus" or s["energy"] >= 0.9)]
+    if not drops:
+        return g
+    fracs = st.get("ride_build", (1.0, 0.30, 0.18))
+    pts, prev = [], 0.0
+    for i, t in enumerate(drops):
+        frac = fracs[min(i, len(fracs) - 1)]
+        pts.append((t - (t - prev) * frac, floor, "hold"))
+        pts.append((t, peak, "rise"))
+        pts.append((t + 0.12, floor, "cut"))
+        prev = t
+    pts.append((p["total"], peak * 0.85, "rise"))
+    times = [0.0] + [q[0] for q in pts]
+    vals = [floor] + [q[1] for q in pts]
+    kinds = ["hold"] + [q[2] for q in pts]
+    for k in range(1, len(times)):
+        a, b = int(times[k - 1] * C.SR), min(n, int(times[k] * C.SR))
+        if b <= a:
             continue
-        # the cut lands on a downbeat: the last bar line of the intro, or the
-        # first beat of the section that is about to hit
-        t = (sec["start"] + (sec["bars"] - 1) * bar_dur) if i == 0 else sec["start"]
-        end = int(round(t * C.SR))
-        a = max(0, end - C.sec(src_dur))
-        if end - a < C.sec(0.3) or end > mix.shape[0]:
-            continue
-        sw = C.reverse_reverb(np.array(mix[a:end], dtype=np.float32), ir,
-                              seconds=sw_dur, curve=1.9, cut=0.045, bright=0.78)
-        i0 = max(0, end - sw.shape[0])
-        n = min(sw.shape[0], mix.shape[0] - i0)
-        if n <= 0:
-            continue
-        mix[i0:i0 + n] += sw[:n] * np.float32(lvl)
+        u = np.linspace(0.0, 1.0, b - a, dtype=np.float32)
+        if kinds[k] == "rise":
+            u = u ** 2.2                    # slow, then a rush at the end
+        g[a:b] = (vals[k - 1] + (vals[k] - vals[k - 1]) * u).astype(np.float32)
+    return g
+
+
+def fly_bed(p: dict, mix: np.ndarray) -> np.ndarray:
+    """A swarm of flies, outside the master room.
+
+    Everything else in the record goes through the master reverb; the flies
+    do not.  They have their own room, and that room is frozen -- whatever
+    goes in comes back out a little darker, forever.  As the record goes on
+    the dry flies are eaten by it, until all that is left is the swarm, held,
+    somewhere very large.
+    """
+    from .instruments import swarm
+    st = p["st"]
+    n = mix.shape[0]
+    total = max(1.0, float(p["total"]))
+    consume = float(st.get("fly_consume", 0.78))
+    floor = float(st.get("fly_floor", 0.05))
+    # two loops of unrelated length: neither repeat is audible, and the
+    # combination does not come round again inside four minutes
+    layers = []
+    for k, (secs, flies) in enumerate(((9.31, 28), (13.77, 22))):
+        loop = swarm.swarm_loop(seconds=secs, seed=p["seed"] + 17 * k + 3,
+                                flies=flies)
+        loop = C.lowpass(C.highpass(loop, 300.0), 8600.0)
+        loop = C.at_db(loop, st["fly_db"] - 3.0 * k)
+        froz = C.at_db(swarm.frozen(loop, seed=p["seed"] + 61 * k),
+                       st["fly_freeze_db"] - 2.0 * k)
+        layers.append((loop, froz, 1.0 - 0.35 * k, 19.0 + 7.0 * k))
+    block = C.sec(6.0)
+    for i in range(0, n, block):
+        j = min(n, i + block)
+        u = min(1.0, ((i + j) * 0.5 / C.SR) / (consume * total))
+        # equal power, so the handover does not dip: the dry swarm fades out
+        # on exactly the curve the frozen one fades in, and the whole bed
+        # lifts a little on the way, because it is meant to be taking over
+        dry = floor + (1.0 - floor) * max(0.0, 1.0 - u) ** 0.55
+        wet = u ** 0.9 * (1.0 + 0.5 * u)
+        idx_a = np.arange(i, j) % layers[0][0].shape[0]
+        idx_b = np.arange(i, j) % layers[1][0].shape[0]
+        t = np.arange(i, j) / C.SR
+        seg = np.zeros((j - i, 2), dtype=np.float64)
+        for idx, (loop, froz, lvl, per) in zip((idx_a, idx_b), layers):
+            breath = 1.0 + 0.30 * np.sin(2 * np.pi * t / per)
+            seg += loop[idx] * (dry * lvl * breath)[:, None]
+            seg += froz[idx] * (wet * lvl)          # wet is a scalar: the room opens
+        mix[i:j] += seg.astype(C.FLOAT)
+    del layers
     return mix
 
 
@@ -705,14 +766,20 @@ def render_perc(p: dict, sec: dict, cache: Cache) -> np.ndarray:
 def render_fx(p: dict, sec: dict, cache: Cache) -> np.ndarray:
     st = p["st"]
     out = np.zeros((C.sec(sec["dur"] + 3.0), 2), dtype=np.float32)
-    if sec["name"] == "pre":
+    if sec["name"] == "pre" and st.get("riser", True):
         C.mix_at(out, riser(sec["dur"] * 0.5, seed=p["seed"]), sec["dur"] * 0.5,
                  gain=0.5, p=0.0)
-    # the build used to be a backwards noise sweep here; it is gone.  The
-    # ghost swells in render() are made of the track itself and do the job.
+    # The build is not an effect any more.  It was a noise riser here, a sub
+    # boom and a crash on the downbeat, and a ghost swell underneath all of
+    # it -- three synthesised noises stacked on every drop.  Now the drop is
+    # built by the master return fader, and the drums land on their own.
     if sec["name"] == "chorus" and sec["energy"] > 0.8:
-        C.mix_at(out, impact(seed=p["seed"] + sec["index"]), 0.0, gain=0.5, p=0.0)
-        C.mix_at(out, D.hit("crash", decay=2.8, level=1.0), 0.0, gain=0.5, p=0.1)
+        if st.get("impact", True):
+            C.mix_at(out, impact(seed=p["seed"] + sec["index"]), 0.0,
+                     gain=0.5, p=0.0)
+        if st.get("chorus_crash", True):
+            C.mix_at(out, D.hit("crash", decay=2.8, level=1.0), 0.0,
+                     gain=0.5, p=0.1)
     if sec["name"] == "outro" and st.get("outro_tail", True):
         C.mix_at(out, downlifter(1.6, seed=p["seed"]), 0.0, gain=0.4, p=0.0)
     return M.stem_fx(out, hp=40.0, gain_db=4.0)
@@ -824,9 +891,8 @@ def render(p: dict, progress=None) -> np.ndarray:
     cache.d.clear()          # rendered stems can be hundreds of MB
     _mem("stems mixed")
 
-    # backwards swells: the mix, reversed through a room, cut on a downbeat
-    mix = section_swells(p, mix)
-    _mem("swells")
+    # (the section-boundary swell used to be mixed in here.  The master
+    # return fader does that job now, with nothing added to the track.)
 
     # macrodynamics.  Most styles set them before the bus so the glue works
     # with them; dance styles (post_auto) ride the fader after the master so
@@ -873,9 +939,21 @@ def render(p: dict, progress=None) -> np.ndarray:
         wr = float(np.sqrt(np.mean(np.asarray(wet, dtype=np.float64) ** 2)))
         if wr > 1e-12:
             wet = (wet * (10.0 ** (float(st["space_db"]) / 20.0) / wr)).astype(C.FLOAT)
+        if st.get("ride", True):
+            ride = reverb_ride(p)
+            for i in range(0, mix.shape[0], 1 << 18):
+                j = min(mix.shape[0], i + (1 << 18))
+                wet[i:j] *= ride[i:j, None]
+            del ride
         mix += wet
         del wet
         _mem("space")
+
+    # the swarm.  It goes in after the room, so the room never touches it:
+    # it has its own, and that one is frozen.
+    if st.get("fly_db"):
+        mix = fly_bed(p, mix)
+        _mem("swarm")
 
     import os
     if os.environ.get("SONORA_DEBUG"):
