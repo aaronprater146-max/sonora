@@ -102,6 +102,14 @@ songs/           rendered songs
 * **Macrodynamics.** Sections are automated before the master bus, so verses
   really are quieter than choruses (about 9 dB of movement) instead of being
   flattened by the limiter.
+* **A backwards reverb, as a technique.** `core.reverse_reverb()` reverses a
+  phrase, runs it through a long room and reverses the result back -- so the
+  room's decay runs *into* the note instead of away from it, and a tail
+  becomes a swell that grows out of nothing.  Cut the swell off at its peak
+  and the ear hears something reversed: it curves up and snaps back to
+  silence, leaving a ghost of the phrase behind it.  It is used per-riff
+  (built from each bar's own audio), at section boundaries (cut on the
+  downbeat of a drop), and as a whisper of a six-second room on the master.
 * **A real master chain.** Glue compression, 3-band control, stereo width,
   bus saturation, lookahead limiting, and BS.1770-gated loudness normalisation.
 

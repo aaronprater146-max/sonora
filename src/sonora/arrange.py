@@ -80,6 +80,11 @@ STYLES: dict[str, dict] = {
         gate=0.11, room=0.02, fill_every=4,
         swing=0.62, hat_vary=0.45, variation=0.42,
         destroy=0.50, drop_break=True, post_auto=True, auto_depth=-8.5,
+        # the room is always there but never in front: a whisper of an
+        # endless space on the master, and the riffs get their own
+        # backwards swells instead of a noise build
+        space_db=-46.0, swell=0.34, swell_density=0.55, master_swell=0.26,
+        outro_tail=False,
         desc="half-time industrial groove: swung closed hats, clicks, gated"),
     "destructed-drums": dict(
         bpm=(118, 122), scale="minor", prog="cinematic",
@@ -244,14 +249,6 @@ def impact(seed: int = 1, boom: float = 1.0) -> np.ndarray:
     return C.fade(y.astype(C.FLOAT), 0.001, 0.3) * 0.8
 
 
-def reverse_sweep(dur: float = 1.6, seed: int = 1) -> np.ndarray:
-    n = C.sec(dur)
-    t = np.arange(n) / C.SR
-    y = C.filt_env(C.noise(n, seed), 2500 + 5000 * (t / dur), 0.8, "bp")
-    y = y * (t / dur) ** 3
-    return C.fade(y.astype(C.FLOAT), 0.01, 0.01) * 0.7
-
-
 def vinyl_tail(dur: float = 1.0, seed: int = 1) -> np.ndarray:
     n = C.sec(dur)
     t = np.arange(n) / C.SR
@@ -307,6 +304,82 @@ def _drum_variant(style: str, energy: float, name: str) -> str:
     return style
 
 
+def riff_swells(p: dict, sec: dict, y: np.ndarray) -> np.ndarray:
+    """A ghost of the riff, played backwards into the next downbeat.
+
+    Not a master effect: each swell is built out of the bar it belongs to, so
+    it carries that riff's own colour -- the same hits, smeared into a curve
+    that rises out of nothing and is cut dead on the downbeat.  Some riffs
+    get one, most do not; that irregularity is the whole point.
+    """
+    st = p["st"]
+    lvl = st.get("swell", 0.0)
+    if lvl <= 0.01:
+        return y
+    every = max(2, st.get("fill_every", 4))
+    dens = st.get("swell_density", 0.5)
+    # aim for one swell every `every` bars across the whole track
+    p_bar = min(0.9, dens / max(1, every // 2))
+    src_dur = min(2.0 * p["spb"], 2.4)        # what the ghost is made of
+    sw_dur = min(2.0 * p["spb"], 2.6)         # how long it takes to arrive
+    bar_dur = 4 * p["spb"]
+    g = C.rng(p["seed"] * 31 + sec["index"] * 7 + 5)
+    ir = ghost_ir(p["seed"])
+    final = sec["index"] == len(p["sections"]) - 1
+    for b in range(sec["bars"]):
+        if final and b == sec["bars"] - 1:
+            continue                          # nothing swells into the fade-out
+        if float(g.uniform(0.0, 1.0)) > p_bar:
+            continue
+        end = int(round((b + 1) * bar_dur * C.SR))
+        a = max(0, end - C.sec(src_dur))
+        if end - a < C.sec(0.25) or end > y.shape[0]:
+            continue
+        sw = C.reverse_reverb(np.array(y[a:end], dtype=np.float32), ir,
+                              seconds=sw_dur, curve=1.8, cut=0.05, bright=0.70)
+        i0 = max(0, end - sw.shape[0])
+        n = min(sw.shape[0], y.shape[0] - i0)
+        if n <= 0:
+            continue
+        gain = np.float32(lvl * (0.55 + 0.45 * float(sec["energy"])))
+        y[i0:i0 + n] += sw[:n] * gain
+    return y
+
+
+def section_swells(p: dict, mix: np.ndarray) -> np.ndarray:
+    """The big ones: the same backwards swell, but taken from the whole mix
+    and cut on the downbeat of a drop.  This is what replaced the noise
+    build -- it is the song remembering itself, not a sweep."""
+    st = p["st"]
+    lvl = st.get("master_swell", 0.0)
+    if lvl <= 0.01:
+        return mix
+    bar_dur = 4 * p["spb"]
+    src_dur = min(2.0 * p["spb"], 2.6)
+    sw_dur = min(2.0 * p["spb"], 2.8)
+    ir = ghost_ir(p["seed"])
+    for i, sec in enumerate(p["sections"]):
+        into_drop = i > 0 and (sec["name"] == "chorus" or sec["energy"] >= 0.95)
+        out_of_intro = i == 0 and sec["bars"] >= 2
+        if not (into_drop or out_of_intro):
+            continue
+        # the cut lands on a downbeat: the last bar line of the intro, or the
+        # first beat of the section that is about to hit
+        t = (sec["start"] + (sec["bars"] - 1) * bar_dur) if i == 0 else sec["start"]
+        end = int(round(t * C.SR))
+        a = max(0, end - C.sec(src_dur))
+        if end - a < C.sec(0.3) or end > mix.shape[0]:
+            continue
+        sw = C.reverse_reverb(np.array(mix[a:end], dtype=np.float32), ir,
+                              seconds=sw_dur, curve=1.9, cut=0.045, bright=0.78)
+        i0 = max(0, end - sw.shape[0])
+        n = min(sw.shape[0], mix.shape[0] - i0)
+        if n <= 0:
+            continue
+        mix[i0:i0 + n] += sw[:n] * np.float32(lvl)
+    return mix
+
+
 def render_drums(p: dict, sec: dict, cache: Cache) -> np.ndarray:
     st = p["st"]
     variant = _drum_variant(st["drum"], sec["energy"], sec["name"])
@@ -347,6 +420,7 @@ def render_drums(p: dict, sec: dict, cache: Cache) -> np.ndarray:
             ramp = max(0.0, (float(sec["energy"]) - 0.58) / 0.42) ** 1.2
             y = C.mangle(y, seed=p["seed"] + sec["index"] * 17,
                          amount=st["destroy"] * ramp)
+        y = riff_swells(p, sec, y)
         cache.put(key, y)
     return y
 
@@ -629,16 +703,17 @@ def render_perc(p: dict, sec: dict, cache: Cache) -> np.ndarray:
 
 
 def render_fx(p: dict, sec: dict, cache: Cache) -> np.ndarray:
+    st = p["st"]
     out = np.zeros((C.sec(sec["dur"] + 3.0), 2), dtype=np.float32)
     if sec["name"] == "pre":
         C.mix_at(out, riser(sec["dur"] * 0.5, seed=p["seed"]), sec["dur"] * 0.5,
                  gain=0.5, p=0.0)
-    if sec["index"] == 0:
-        C.mix_at(out, reverse_sweep(2.0, seed=p["seed"]), 0.0, gain=0.35, p=0.0)
+    # the build used to be a backwards noise sweep here; it is gone.  The
+    # ghost swells in render() are made of the track itself and do the job.
     if sec["name"] == "chorus" and sec["energy"] > 0.8:
         C.mix_at(out, impact(seed=p["seed"] + sec["index"]), 0.0, gain=0.5, p=0.0)
         C.mix_at(out, D.hit("crash", decay=2.8, level=1.0), 0.0, gain=0.5, p=0.1)
-    if sec["name"] == "outro":
+    if sec["name"] == "outro" and st.get("outro_tail", True):
         C.mix_at(out, downlifter(1.6, seed=p["seed"]), 0.0, gain=0.4, p=0.0)
     return M.stem_fx(out, hp=40.0, gain_db=4.0)
 
@@ -649,7 +724,23 @@ def render_fx(p: dict, sec: dict, cache: Cache) -> np.ndarray:
 
 IRS = {"hall": dict(seconds=3.4, decay=1.5, size=1.0, damping=0.5, brightness=0.6),
        "room": dict(seconds=1.3, decay=2.6, size=0.5, damping=0.7, brightness=0.5),
-       "plate": dict(seconds=2.2, decay=1.8, size=0.6, damping=0.35, brightness=0.85)}
+       "plate": dict(seconds=2.2, decay=1.8, size=0.6, damping=0.35, brightness=0.85),
+       # a room with no walls: long, dark, deliberately quiet.  Used as a
+       # master send so you feel the space and never hear the effect.
+       "infinite": dict(seconds=6.0, decay=0.55, predelay=0.055, size=1.0,
+                        damping=0.66, brightness=0.18, early=26, tail_exp=0.40),
+       # soft and reflection-free: this one is not a room, it is the
+       # material the backwards swells are made of
+       "ghost": dict(seconds=5.0, decay=0.5, predelay=0.004, size=0.9,
+                     damping=0.72, brightness=0.28, early=6, tail_exp=0.55)}
+
+_GHOST_IR = {}
+
+def ghost_ir(seed: int = 11) -> np.ndarray:
+    """the swell room, built once -- it is 2 MB and every riff uses it"""
+    if "ir" not in _GHOST_IR:
+        _GHOST_IR["ir"] = C.make_ir(seed=seed, **IRS["ghost"])
+    return _GHOST_IR["ir"]
 
 LAYERS = [("drums", render_drums, 0.0), ("bass", render_bass, 0.0),
           ("pad", render_pad, 0.22), ("keys", render_keys, 0.18),
@@ -733,6 +824,10 @@ def render(p: dict, progress=None) -> np.ndarray:
     cache.d.clear()          # rendered stems can be hundreds of MB
     _mem("stems mixed")
 
+    # backwards swells: the mix, reversed through a room, cut on a downbeat
+    mix = section_swells(p, mix)
+    _mem("swells")
+
     # macrodynamics.  Most styles set them before the bus so the glue works
     # with them; dance styles (post_auto) ride the fader after the master so
     # the limiter cannot squash the breakdown back up to the level of the drop.
@@ -760,6 +855,27 @@ def render(p: dict, progress=None) -> np.ndarray:
             mix[i:j] = sub[i:j] + high[i:j] * g[i:j, None]
         del sub, high, g
         _mem("sidechain")
+
+    # the room with no walls.  A whisper on the master: band-limited so it
+    # cannot smear the kick or add fizz, and predelayed so it never touches
+    # a transient.  You should feel it and not be able to point at it.
+    if st.get("space_db"):
+        ir_space = C.fade(C.make_ir(seed=p["seed"] + 77, **IRS["infinite"]),
+                          0.0, 0.8)
+        wet = C.send_reverb(mix, ir_space, send=1.0)
+        del ir_space
+        wet = C.highpass(wet, 320.0)
+        wet = C.lowpass(wet, 5200.0)
+        # level it by measured RMS, not by peak.  This room is six seconds of
+        # dense tail, so peak-normalising it puts the wash in front of the
+        # drums instead of behind them -- which is the one thing that must
+        # never happen on a record whose whole point is the drum.
+        wr = float(np.sqrt(np.mean(np.asarray(wet, dtype=np.float64) ** 2)))
+        if wr > 1e-12:
+            wet = (wet * (10.0 ** (float(st["space_db"]) / 20.0) / wr)).astype(C.FLOAT)
+        mix += wet
+        del wet
+        _mem("space")
 
     import os
     if os.environ.get("SONORA_DEBUG"):

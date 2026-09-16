@@ -479,7 +479,7 @@ def delay(x, time_s, fb=0.35, mix=0.3, damp=6000.0, pingpong=False):
 
 
 def make_ir(seconds=2.2, decay=2.2, predelay=0.012, size=1.0, damping=0.55,
-            brightness=0.6, seed=7, early=16, tail_hp=0.0):
+            brightness=0.6, seed=7, early=16, tail_hp=0.0, tail_exp=1.2):
     """generated stereo impulse response: early reflections + dense decaying tail"""
     n = sec(seconds)
     g = rng(seed)
@@ -505,7 +505,7 @@ def make_ir(seconds=2.2, decay=2.2, predelay=0.012, size=1.0, damping=0.55,
         for i in range(n):
             lp += co * (y[i] - lp)
             y[i] = lp
-        y *= np.exp(-t * 1.2)
+        y *= np.exp(-t * tail_exp)
         ir[:, ch] += y * 0.9 + np.roll(y, 137) * 0.25
     ir = np.stack([low_shelf(ir[:, 0].astype(FLOAT), 120.0, -3.0),
                    low_shelf(ir[:, 1].astype(FLOAT), 120.0, -3.0)], 1)
@@ -547,6 +547,55 @@ def reverb(x, ir, mix=0.25, predelay_s=0.0):
         xp = x
     w = _conv(xp, ir)[:n]
     return ((1.0 - mix) * x.astype(np.float64) + mix * w).astype(FLOAT)
+
+
+def reverse_reverb(x, ir, seconds=2.0, curve=1.7, cut=0.05, bright=0.65,
+                   hp=110.0, lp_lo=650.0) -> np.ndarray:
+    """The backwards-reverb trick.
+
+    Reverse the phrase, run it through a long room, reverse the result back.
+    A room's decay normally runs *away* from a hit; reversed it runs *into*
+    it, so instead of a tail that dies after the note you get a swell that
+    grows out of nothing.  Cut the swell off at its peak -- `cut` seconds,
+    hard -- and the ear hears something reversed: it curves up, snaps back
+    to silence, and leaves a ghost of the phrase hanging behind it.
+
+    seconds  how much of the rise to keep
+    curve    how sharply it curls (1.0 straight, 2.0 late and dramatic)
+    bright   how far the filter opens on the way up -- this is what makes it
+             read as a reversal instead of a fade-in
+    """
+    x = ensure2(x)
+    if x.shape[0] < 64 or float(np.max(np.abs(x))) < 1e-7:
+        return np.zeros((max(1, sec(seconds)), 2), dtype=FLOAT)
+    xr = np.ascontiguousarray(x[::-1])
+    w = _conv(xr, ir)                        # the room, run backwards...
+    s = np.ascontiguousarray(w[::-1])        # ...so its decay runs forwards
+    k = sec(seconds)
+    # anchor the cut on the swell's own loudest moment.  A riff that stops
+    # playing half a beat before the bar line would otherwise leave a hole of
+    # silence exactly where the cut is supposed to land, and the whole trick
+    # disappears -- the peak has to be the last thing you hear.
+    env = np.abs(s.mean(axis=1))
+    win = max(2, int(0.008 * SR))
+    env = np.sqrt(np.convolve(env * env, np.ones(win) / win, mode="same"))
+    back = min(env.size, k + SR)
+    ipk = int(np.argmax(env[env.size - back:])) + (env.size - back)
+    ipk = min(env.size, ipk + int(0.008 * SR))
+    s = s[max(0, ipk - k):ipk]
+    if s.shape[0] < k:
+        s = np.pad(s, ((k - s.shape[0], 0), (0, 0)))
+    u = np.linspace(0.0, 1.0, k, dtype=np.float64)
+    s = s * (u ** curve)[:, None]
+    lo = lp_lo + (9000.0 - lp_lo) * bright * u ** 2.0
+    s = np.stack([filt_env(s[:, 0], lo, 0.7, "lp"),
+                  filt_env(s[:, 1], lo, 0.7, "lp")], 1)
+    s = highpass(s, hp)
+    s = fade(s, 0.0, cut)                    # back to baseline: the cut
+    pk = float(np.max(np.abs(s)))
+    if pk > 1e-9:
+        s = (s * (0.98 / pk)).astype(FLOAT)
+    return s.astype(FLOAT)
 
 
 def send_reverb(x, ir, send=0.3, predelay_s=0.0):

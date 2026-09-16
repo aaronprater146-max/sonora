@@ -73,3 +73,63 @@ Measured on three consecutive bars:
 The gate threshold had to come down from 0.17 to 0.11 to stop it eating the
 softer offbeat hats -- the gate is normalised to the loudest hit, and a closed
 hat is a lot quieter than a kick.
+
+## The room, and the backwards swells
+
+**The noise sweep is gone.** The build used to be `reverse_sweep()` --
+bandpassed noise rising over two seconds.  It sounded like a backwards open
+hat because that is more or less what it was.  `render_fx()` no longer plays
+it at all.
+
+**The end drone is gone.** The outro dropped a sliding saw tone under the last
+bars: two and a half seconds of one pitched note, the only pitched sound on a
+drum record.  Off for this style (`outro_tail=False`).
+
+**There is a room now.** A six-second, dark, predelayed room
+(`IRS["infinite"]`) on the master at `space_db=-46`, band-limited to
+320 Hz-5.2 kHz so it cannot smear the kick or add fizz, and predelayed 55 ms
+so it never touches a transient.  It is levelled by **measured RMS, not by
+peak**: this room is six seconds of dense tail, and peak-normalising it put
+the wash in *front* of the drums -- the one thing that must never happen on a
+record whose whole point is the drum.
+
+    measured on the finished file
+      hit-to-gap        53.3 dB   (83.4 with dead silence; 12.6 on the first try)
+      wash in the gaps   -50 dBFS, 39 dB under the hits
+      wet rms           -45.7 dBFS
+
+**And the swells.** `core.reverse_reverb()` is the technique: reverse the
+phrase, run it through a long room, reverse the result back.  A room's decay
+normally runs away from a hit; reversed it runs into it, so a tail becomes a
+swell that grows out of nothing.  Cut it off at its peak -- 50 ms, hard -- and
+the ear hears something reversed: it curves up and snaps back to silence.
+
+It is used at two scales, and neither one is a master effect:
+
+* **per riff** (`riff_swells`) -- each swell is built out of the bar it belongs
+  to, so it carries that riff's own colour.  Roughly one bar in four gets one,
+  at random: 18 of them on this track.
+* **per section** (`section_swells`) -- taken from the mix of the two beats
+  before a drop and cut on its downbeat.  4 of them.  These replaced the
+  noise build.
+
+One swell, measured in isolation:
+
+    0.00s  -75 dB
+    1.00s  -49 dB   ####################
+    1.25s  -41 dB   ############################
+    1.50s  -34 dB   ###################################
+    1.75s  -24 dB   #############################################
+    1.95s  -23 dB   ##############################################   <- cut
+
+The cut is anchored on the swell's own loudest moment, because a riff that
+stops playing half a beat early would otherwise leave a hole of silence
+exactly where the cut is supposed to land, and the trick disappears.
+
+Knobs, all on the style:
+
+    space_db=-46.0        master room: wet RMS in dBFS
+    swell=0.34            per-riff swell level
+    swell_density=0.55    roughly one every four bars
+    master_swell=0.26     section-boundary swell level
+    outro_tail=False      no end drone
