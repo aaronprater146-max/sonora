@@ -25,6 +25,7 @@ That is the whole thing. Run it as many times as you want; each run is free.
 
 | style | bpm | what it is |
 |---|---|---|
+| `destructed-drums` | 118–122 | drums only, every hit damaged differently |
 | `industrial-rock` | 80–88 | static synths, glitched edits, tight dry drums |
 | `techno-rave` | 138–150 | four-on-the-floor, offbeat open hats, 303 acid line, hoover drops |
 | `cinematic-pop` | 84–96 | hybrid orchestral / modern pop, trailer-friendly |
@@ -59,7 +60,7 @@ Output formats: `.wav` (24-bit), `.flac`, `.ogg`.
 src/sonora/
   core.py        DSP: oscillators, filters, reverbs, compressors, loudness
   theory.py      scales, chords, voice-leading, motifs, rhythm templates
-  arrange.py     12 styles, section planner, stem rendering, the mix
+  arrange.py     13 styles, section planner, stem rendering, the mix
   ears.py        the analysis library: loudness, rhythm, melody, harmony,
                  texture, structure -- see the three tools below
   feel.py        rhythm analysis -- onset rate, kick grid, so "is this

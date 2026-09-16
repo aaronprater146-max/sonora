@@ -40,7 +40,8 @@ def main() -> int:
     ap.add_argument("--key", default=None, help="tonic, e.g. Am / C / F# / 57")
     ap.add_argument("--bpm", type=float, default=None)
     ap.add_argument("--seed", type=int, default=None, help="any integer; same seed = same song")
-    ap.add_argument("--shape", default="default", choices=["default", "short", "epic", "rave", "industrial"])
+    ap.add_argument("--shape", default="default", choices=["default", "short", "epic", "rave", "industrial",
+                            "drowning"])
     ap.add_argument("--out", default="song.wav", help=".wav, .flac or .ogg")
     ap.add_argument("--sr", type=int, default=48000)
     ap.add_argument("--quiet", action="store_true")
@@ -58,7 +59,8 @@ def main() -> int:
         args.key = ["Am", "Cm", "Dm", "Em", "Fm", "Gm", "C", "A", "E", "F#"][seed % 10]
     if args.shape == "default":
         args.shape = {"techno-rave": "rave", "edm-festival": "rave",
-                      "industrial-rock": "industrial"}.get(args.style, "default")
+                      "industrial-rock": "industrial",
+                      "destructed-drums": "drowning"}.get(args.style, "default")
     tonic = parse_key(args.key)
     t0 = time.time()
     p = A.plan(args.style, seed=seed, tonic=int(round(tonic)) if not isinstance(tonic, int) else tonic,

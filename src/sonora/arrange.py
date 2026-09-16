@@ -69,6 +69,16 @@ STYLES: dict[str, dict] = {
         arp="kalimba", keys="", strings=True, choir=True, bells=True,
         perc="shaker", ir="hall", rev=0.34, sidechain=1.0, lufs=-11.5, width=1.10,
         desc="harp, kalimba, handpan, flute and strings over live-feeling drums"),
+    "destructed-drums": dict(
+        bpm=(118, 122), scale="minor", prog="cinematic",
+        kit="drowning", drum="drowning",
+        bass="", pad="", lead="", arp="", keys="",
+        strings=False, choir=False, bells=False, perc="shaker",
+        ir="room", rev=0.16, sidechain=0.0, lufs=-11.0, width=1.08,
+        glue=0.50, air=0.90, punch=1.35, tilt=0.0,
+        mix=dict(drums=0.0, perc=-2.0, fx=2.0),
+        destroy=1.0, drop_break=True, post_auto=True, auto_depth=-8.5,
+        desc="drums only, every hit damaged differently: crushed, ring-modulated, reversed"),
     "industrial-rock": dict(
         bpm=(80, 88), scale="minor", prog="cinematic", kit="industrial",
         drum="industrial", bass="distorted_bass", bass_rhythm="push",
@@ -112,6 +122,11 @@ ARRANGEMENTS: dict[str, list[tuple[str, int, float]]] = {
     ],
     "short": [("intro", 4, 0.25), ("verse", 8, 0.5), ("chorus", 8, 0.9),
               ("verse", 8, 0.6), ("chorus", 8, 1.0), ("outro", 4, 0.25)],
+    "drowning": [("intro", 8, 0.35), ("verse", 12, 0.60), ("pre", 6, 0.74),
+                 ("chorus", 12, 1.00), ("verse", 12, 0.64), ("bridge", 10, 0.30),
+                 ("pre", 6, 0.80), ("chorus", 12, 1.00), ("bridge", 8, 0.34),
+                 ("verse", 12, 0.72), ("pre", 6, 0.84), ("chorus", 12, 0.95),
+                 ("outro", 8, 0.34)],
     "industrial": [("intro", 8, 0.40), ("verse", 8, 0.62), ("pre", 4, 0.74),
                    ("chorus", 8, 1.00), ("verse", 8, 0.66), ("pre", 4, 0.78),
                    ("chorus", 8, 1.00), ("bridge", 8, 0.32), ("pre", 4, 0.80),
@@ -244,6 +259,13 @@ class Cache:
 
 
 def _drum_variant(style: str, energy: float, name: str) -> str:
+    if style == "drowning":
+        # a drum record does not stop drumming for the break, it thins out
+        if name == "bridge":
+            return "drowning_break"
+        if name in ("intro", "outro"):
+            return "drowning_intro"
+        return "drowning_drive" if energy >= 0.72 else "drowning"
     if name == "bridge":
         return "none" if energy < 0.45 else "break"
     if style == "industrial":
@@ -289,6 +311,11 @@ def render_drums(p: dict, sec: dict, cache: Cache) -> np.ndarray:
                              room=0.10, seed=p["seed"])
         y = M.stem_fx(y, hp=26.0, comp=(-14.0, 2.2, 0.006, 0.09), sat=0.12,
                       width=1.02, gain_db=-5.0)
+        if st.get("destroy"):
+            # more damage where the record is loudest: the drops are the
+            # parts that should sound like the machine is coming apart
+            amt = st["destroy"] * (0.55 + 0.45 * float(sec["energy"]))
+            y = C.mangle(y, seed=p["seed"] + sec["index"] * 17, amount=amt)
         cache.put(key, y)
     return y
 

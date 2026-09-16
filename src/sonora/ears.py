@@ -202,12 +202,16 @@ def texture(x: np.ndarray, sr: int = SR) -> dict:
     freqs = librosa.fft_frequencies(sr=sr, n_fft=N_FFT)
     p = (S ** 2).mean(axis=1)
     tot = p.sum() + 1e-20
+    # power per Hz, not per band: otherwise a 14 kHz band always beats a
+    # 190 Hz one and every mix looks brighter on top than it really is
     bands = {}
     for lo, hi, name in ((20, 60, "sub"), (60, 250, "low"), (250, 500, "lowmid"),
                          (500, 2000, "mid"), (2000, 6000, "himid"),
                          (6000, 20000, "high")):
         sel = (freqs >= lo) & (freqs < hi)
-        bands[name] = float(10 * math.log10(p[sel].sum() / tot + 1e-12))
+        bw = float(sel.sum()) * (sr / N_FFT)
+        bands[name] = float(10 * math.log10(p[sel].sum() / max(bw, 1.0) + 1e-20))
+    bands = {k: (v - max(bands.values())) for k, v in bands.items()}
     return dict(flatness=float(flat), centroid_hz=cent, rolloff_hz=roll,
                 bands_db=bands)
 
@@ -360,7 +364,11 @@ def verdict(a: dict) -> list[tuple[str, str, str]]:
     r, mel, lo, tx = a["rhythm"], a["melody"], a["loudness"], a["texture"]
     st = a["structure"]
 
-    if mel["notes_per_s"] >= 1.5:
+    if mel["voiced"] < 0.25 and r["onsets_per_s"] > 2.0:
+        # a drum record is supposed to have no melody; saying FAIL is a lie
+        out.append(("--", "no pitched material (a drum / percussion track)",
+                    f"{r['onsets_per_s']:.1f} onsets/s and nothing holding a pitch"))
+    elif mel["notes_per_s"] >= 1.5:
         out.append(("OK", f"melody moves {mel['notes_per_s']:.1f} notes/s",
                     f"range {mel['range_semis']:.0f} semitones, "
                     f"held {mel['median_hold_s']:.2f}s a note"))
@@ -381,9 +389,11 @@ def verdict(a: dict) -> list[tuple[str, str, str]]:
         out.append(("FAIL", "not rhythmic", f"only {r['onsets_per_s']:.1f} onsets/s"))
 
     if st["contrast_db"] >= 5.0:
+        rep = ("repeats n/a, no pitched material to compare"
+               if mel["voiced"] < 0.25 else
+               f"{st['repeats']*100:.0f}% of the tune comes back")
         out.append(("OK", f"arrangement breathes ({st['contrast_db']:.1f} dB)",
-                    f"{len(st['sections'])} sections, "
-                    f"{st['repeats']*100:.0f}% of the tune comes back"))
+                    f"{len(st['sections'])} sections, {rep}"))
     else:
         out.append(("WARN", "flat arrangement",
                     f"only {st['contrast_db']:.1f} dB between the quietest "
@@ -441,7 +451,7 @@ def analyze(path: str, window: float = 120.0) -> dict:
 def card(a: dict) -> str:
     L, R, M, T, H, S = (a["loudness"], a["rhythm"], a["melody"], a["texture"],
                         a["harmony"], a["structure"])
-    icon = {"OK": "  ok  ", "WARN": " warn ", "FAIL": " FAIL "}
+    icon = {"OK": "  ok  ", "WARN": " warn ", "FAIL": " FAIL ", "--": " n/a  "}
     w = a.get("window_start", 0.0)
     measured = (f"measured at {w:.0f}-{w + R['duration']:.0f}s"
                 if w > 0.5 else "whole file")
@@ -457,13 +467,18 @@ def card(a: dict) -> str:
     lines += ["",
               f"  rhythm    {R['onsets_per_s']:.1f} onsets/s  "
               f"(low {R['low_onsets_per_s']:.1f}  high {R['high_onsets_per_s']:.1f})",
-              f"  melody    {M['notes_per_s']:.2f} notes/s   "
-              f"hold {M['median_hold_s']:.2f}s   range {M['range_semis']:.0f} st   "
-              f"prominence {M['prominence']:.2f}",
+              (f"  melody    {M['notes_per_s']:.2f} notes/s   "
+               f"hold {M['median_hold_s']:.2f}s   range {M['range_semis']:.0f} st   "
+               f"prominence {M['prominence']:.2f}"
+               if M["voiced"] >= 0.25 else
+               f"  melody    n/a -- unpitched ({M['voiced']*100:.0f}% of frames "
+               f"hold a steady pitch)"),
               f"  texture   flatness {T['flatness']:.3f}   "
               f"centroid {T['centroid_hz']:.0f} Hz   rolloff {T['rolloff_hz']:.0f} Hz",
               f"  harmony   {H['chords_per_min']:.0f} chord changes/min",
               f"  structure {len(S['sections'])} sections, "
-              f"{S['contrast_db']:.1f} dB contrast, {S['repeats']*100:.0f}% repeats",
+              f"{S['contrast_db']:.1f} dB contrast, "
+              + ("repeats n/a (unpitched)" if M["voiced"] < 0.25
+                 else f"{S['repeats']*100:.0f}% repeats"),
               "  bands     " + "  ".join(f"{k} {v:+.0f}" for k, v in T["bands_db"].items())]
     return "\n".join(lines)

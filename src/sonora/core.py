@@ -878,6 +878,86 @@ def fade(x, fin=0.005, fout=0.05):
     return x.astype(FLOAT)
 
 
+def bitcrush(y: np.ndarray, bits: int = 5, hold: int = 1) -> np.ndarray:
+    """reduce bit depth and, with hold > 1, sample rate as well"""
+    bits = int(np.clip(bits, 1, 16))
+    levels = 2.0 ** (bits - 1)
+    q = np.round(np.clip(np.asarray(y, dtype=FLOAT), -1.0, 1.0) * levels) / levels
+    if hold > 1:
+        n = q.shape[0]
+        k = np.clip((np.arange(n) // hold) * hold, 0, n - 1)
+        q = q[k]
+    return q.astype(FLOAT)
+
+
+def ringmod(y: np.ndarray, freq: float, mix: float = 0.5) -> np.ndarray:
+    """multiply by a sine: turns a drum into a bell, a gong or a machine"""
+    t = np.arange(y.shape[0], dtype=np.float32) / SR
+    m = np.sin(2 * np.pi * freq * t)[:, None]
+    y = np.asarray(y, dtype=FLOAT)
+    return (y * (1.0 - mix) + y * m * mix).astype(FLOAT)
+
+
+def varispeed(y: np.ndarray, semis: float) -> np.ndarray:
+    """resample in place, keeping the slot length: pitch shift + time change"""
+    n = y.shape[0]
+    if n < 8 or abs(semis) < 0.01:
+        return y
+    idx = np.clip(np.arange(n, dtype=np.float64) * (2.0 ** (semis / 12.0)), 0, n - 1)
+    i0 = idx.astype(np.int64)
+    i1 = np.minimum(i0 + 1, n - 1)
+    f = (idx - i0)[:, None].astype(FLOAT)
+    return (y[i0] * (1.0 - f) + y[i1] * f).astype(FLOAT)
+
+
+def mangle(y: np.ndarray, seed: int = 1, amount: float = 1.0) -> np.ndarray:
+    """Damage every hit differently.
+
+    This is what makes programmed drums sound like they were run through a
+    broken machine on purpose: each hit independently gets reversed, pitched,
+    bit-crushed, ring-modulated or cut short.  Nothing repeats the same way
+    twice, which is the difference between "processed" and "destroyed".
+    """
+    if amount <= 0.01:
+        return y
+    from .feel import onsets                      # lazy: feel imports core
+    t, _, _ = onsets(np.asarray(mono(y), dtype=FLOAT), threshold=1.0)
+    if t.size < 4:
+        return y
+    n = y.shape[0]
+    edges = np.unique(np.concatenate(([0], (t * SR).astype(np.int64), [n])))
+    edges = edges[(edges >= 0) & (edges <= n)]
+    if edges.size < 3:
+        return y
+    out = np.empty_like(y)
+    r = rng(seed)
+    for a, b in zip(edges[:-1], edges[1:]):
+        if b - a < 32:
+            out[a:b] = y[a:b]
+            continue
+        seg = y[a:b]
+        u = r.random(5)
+        if u[0] < 0.15 * amount:                                   # backwards
+            seg = np.ascontiguousarray(seg[::-1])
+        if u[1] < 0.58 * amount:                                   # detuned hit
+            seg = varispeed(seg, float(r.uniform(-12.0, 12.0)))
+        if u[2] < 0.72 * amount:                                   # crushed
+            seg = bitcrush(seg, int(r.integers(2, 8)), int(r.integers(1, 6)))
+        if u[3] < 0.34 * amount:                                   # metallic
+            seg = ringmod(seg, float(r.uniform(30.0, 2600.0)),
+                          float(r.uniform(0.25, 0.75)))
+        if u[4] < 0.33 * amount:                                   # cut short
+            k = max(32, int(seg.shape[0] * float(r.uniform(0.12, 0.6))))
+            seg = seg[:k]
+        if seg.shape[0] >= b - a:
+            out[a:b] = seg[:b - a]
+        else:
+            out[a:a + seg.shape[0]] = seg
+            out[a + seg.shape[0]:b] = 0.0
+        del seg
+    return out
+
+
 def stutter(y: np.ndarray, step_s: float, seed: int = 1,
             drop: float = 0.22, chop: float = 0.20) -> np.ndarray:
     """Gate a part into 16ths the way a sampler would: steps go missing or get
