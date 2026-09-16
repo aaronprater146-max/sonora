@@ -25,7 +25,7 @@ That is the whole thing. Run it as many times as you want; each run is free.
 
 | style | bpm | what it is |
 |---|---|---|
-| `slow-groove` | 58–62 | half-time industrial groove: swung closed hats, clicks, gated |
+| `slow-groove` | 58–62 | half-time industrial groove: swung closed hats, clicks, gated, 16-step sequencer bass |
 | `destructed-drums` | 118–122 | dry gated one-two beat, damaged only in the loud sections |
 | `industrial-rock` | 80–88 | static synths, glitched edits, tight dry drums |
 | `techno-rave` | 138–150 | four-on-the-floor, offbeat open hats, 303 acid line, hoover drops |

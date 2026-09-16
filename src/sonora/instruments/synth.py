@@ -185,6 +185,18 @@ PRESETS: dict[str, dict] = {
                  f_a=0.002, f_d=0.11, f_s=0.04, f_r=0.06,
                  amp_a=0.002, amp_d=0.16, amp_s=0.0, amp_r=0.04,
                  drive=2.2, vel_to_cutoff=0.9),
+    # ---- machine bass ---------------------------------------------------
+    # Nothing about this one drifts: no vibrato, no glide, one short envelope
+    # repeated until the bar ends.  The darkness is a resonant ladder that
+    # snaps shut over every step, and a sub an octave down that the filter
+    # never quite reaches.  The click is the sequencer itself.
+    "grid_bass": dict(wave_a="saw", wave_b="square", mix=0.40, unison=3,
+                      spread=0.15, detune=11, oct_b=0, sub=0.0,
+                      noise_lvl=0.055,
+                      cutoff=176.0, env_amt=0.40, ftype="lp24", res=0.95,
+                      f_a=0.002, f_d=0.075, f_s=0.16, f_r=0.05,
+                      amp_a=0.002, amp_d=0.035, amp_s=0.58, amp_r=0.026,
+                      drive=2.6, vel_to_cutoff=0.5, vel_to_amp=0.8),
     "hoover": dict(wave_a="supersaw", wave_b="saw", mix=0.4, unison=9, spread=0.85,
                    cutoff=520, env_amt=0.85, ftype="lp24", res=0.55,
                    f_a=0.18, f_d=0.6, f_s=0.5,

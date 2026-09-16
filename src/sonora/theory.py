@@ -179,6 +179,12 @@ def rhythm(style: str, bar: int, seed: int = 1) -> list[tuple[float, float, floa
                  (3.5, .5, .9)],
         "offbeat16": [(i * .25, .25, 1.0 if i % 4 == 0 else .7) for i in range(16)],
         "roll": [(i * .25, .25, min(1.0, .45 + i * .06)) for i in range(16)],
+        # a step sequencer.  The same steps, in the same order, at the same
+        # velocity, forever -- nothing here is humanised, and the note is cut
+        # a shade shorter than the step so the thing ticks instead of sings.
+        "grid16": [(i * .25, .12, 1.0 if i % 4 == 0 else (.72 if i % 2 == 0 else .58))
+                   for i in range(16)],
+        "grid8": [(i * .5, .24, 1.0 if i % 2 == 0 else .68) for i in range(8)],
     }[style]
     return [(float(a), float(b), float(c)) for a, b, c in p]
 

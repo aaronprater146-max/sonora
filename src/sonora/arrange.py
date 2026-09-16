@@ -72,11 +72,13 @@ STYLES: dict[str, dict] = {
     "slow-groove": dict(
         bpm=(58, 62), scale="minor", prog="cinematic",
         kit="groove", drum="groove",
-        bass="", pad="", lead="", arp="", keys="",
+        bass="grid_bass", bass_rhythm="grid", bass_machine=True, bass_duck=8.0,
+        bass_mid_cut=5.0,
+        pad="", lead="", arp="", keys="",
         strings=False, choir=False, bells=False, perc="",
         ir="room", rev=0.05, sidechain=0.0, lufs=-11.0, width=1.06,
         glue=0.50, air=0.90, punch=1.30, tilt=0.0,
-        mix=dict(drums=0.0, perc=-6.0, fx=-3.0),
+        mix=dict(drums=0.0, bass=-1.5, perc=-6.0, fx=-3.0),
         gate=0.11, room=0.02, fill_every=4,
         swing=0.62, hat_vary=0.45, variation=0.42,
         destroy=0.50, drop_break=True, post_auto=True, auto_depth=-8.5,
@@ -500,6 +502,11 @@ def _maybe_sample(pack: str, notes, dur: float, seed: int, fallback):
     return fallback()
 
 
+# the machine riff: root, root, octave, root, fifth, octave, flat seventh.
+# Sixteen steps in F minor, played in this order every bar.
+GRID_SEQ = (0, 0, 12, 0, 7, 0, 12, 0, 0, 12, 7, 0, 10, 0, 7, 12)
+
+
 def render_bass(p: dict, sec: dict, cache: Cache) -> np.ndarray:
     st = p["st"]
     if not st["bass"]:
@@ -508,17 +515,28 @@ def render_bass(p: dict, sec: dict, cache: Cache) -> np.ndarray:
         return None          # breakdown: no bass, so the drop has somewhere to go
     out = np.zeros((C.sec(sec["dur"] + 2.0), 2), dtype=np.float32)
     preset = st["bass"]
+    br = st["bass_rhythm"]
+    if br == "grid":
+        # the machine does not run flat out: eighths while the record is
+        # quiet, sixteenths once it is not
+        br = "grid8" if sec["energy"] < 0.72 else "grid16"
     drop = -36 if preset in ("808bass", "reese") else -24
     roots = T.bass_line(sec["chords"])
     for bar, (chord, root) in enumerate(zip(sec["chords"], roots)):
         root = max(24, root + (12 if drop == -36 else 0))
-        pat = T.rhythm(st["bass_rhythm"], bar, seed=p["seed"] + bar)
+        pat = T.rhythm(br, bar, seed=p["seed"] + bar)
         for (off, durn, vel) in pat:
             nt = root
-            if st["bass_rhythm"] == "acid":
+            if br in ("grid8", "grid16"):
+                # one line, in the same order, every bar.  It moves when the
+                # chord moves and it jumps an octave every fourth bar, and
+                # apart from that it repeats -- that is the whole idea.
+                step = int(round(off * 4.0)) % 16
+                nt = root + GRID_SEQ[step] + (12 if (bar // 4) % 2 else 0)
+            elif br == "acid":
                 seq = [0, 0, 12, 0, 7, 0, 12, 3, 0, 12, 0, 7, 12, 0, 7, 10]
                 nt = root + seq[int(round(off * 4)) % len(seq)]
-            elif st["bass_rhythm"] in ("arp8", "offbeat", "push", "syncop"):
+            elif br in ("arp8", "offbeat", "push", "syncop"):
                 idx = int(off * 2) % len(chord)
                 nt = root + [0, 7, 12, 7][idx % 4]
             dur = durn * p["spb"]
@@ -531,8 +549,35 @@ def render_bass(p: dict, sec: dict, cache: Cache) -> np.ndarray:
                 y2 = _stack(cache, k2, lambda: Y.note(nt + 12, dur * 0.9, "moog_bass",
                                                       vel * 0.8, seed=p["seed"] + nt))
                 C.mix_at(out, y2, bar * 4 * p["spb"] + off * p["spb"], gain=0.16, p=0.0)
-    return M.stem_fx(out, hp=22.0, comp=(-9.0, 3.2, 0.008, 0.10), sat=0.22,
-                     width=1.00, gain_db=-12.0)
+    y = M.stem_fx(out, hp=22.0, comp=(-9.0, 3.2, 0.008, 0.10), sat=0.22,
+                  width=1.00, gain_db=-12.0)
+    # The snare is tuned to 170 Hz, which is the second harmonic of every
+    # note this thing plays.  Tilt the harmonics down under it and the bass
+    # keeps its weight while the backbeat keeps its body.
+    if st.get("bass_mid_cut"):
+        lo, hi = C.crossover(y, 200.0)
+        y = (lo + hi * C.db2amp(-abs(st["bass_mid_cut"]))).astype(np.float32)
+    # A sequencer bass does not stop, so left alone it sits on top of the kick
+    # and the snare body and the record loses both.  Three things keep it out
+    # of the way: it ducks on every beat, it plays quietly where the record is
+    # quiet, and it switches off with the record instead of ticking over the
+    # fade.  What is left is a machine that pumps instead of a wall of tone.
+    if st.get("bass_machine"):
+        times = []
+        for bar in range(sec["bars"]):
+            sh = p["spb"] * 0.5 if (bar % 2 == 1 and st.get("drum_shift")) else 0.0
+            for b in range(4):
+                times.append(bar * 4 * p["spb"] + sh + b * p["spb"])
+        g = C.sidechain_gain(times, y.shape[0], st.get("bass_duck", 6.0),
+                             attack=0.004, release=0.22)
+        y = (y * g[:, None]).astype(np.float32)
+        y = (y * (0.55 + 0.45 * float(sec["energy"]))).astype(np.float32)
+        if sec["start"] == p["sections"][-1]["start"]:
+            tail = min(C.sec(6.0), y.shape[0] - 1)
+            f = np.ones(y.shape[0], dtype=np.float32)
+            f[-tail:] = np.linspace(1.0, 0.0, tail, dtype=np.float32) ** 1.6
+            y = (y * f[:, None]).astype(np.float32)
+    return y
 
 
 def _stack(cache, key, fn):

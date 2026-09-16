@@ -216,9 +216,8 @@ record the dry swarm is 5% of what it was and the freeze is everything.
     200-220s  -43.7 dBFS   the freeze has taken over (+7 dB)
     232-248s  -47.3 dBFS   outro
 
-Hit-to-gap is 43.5 dB.  It was 53.3 dB before the swarm existed and 12.6 dB
-the first time the room was levelled by peak instead of by RMS, so the drum
-is still 43 dB clear of everything underneath it.
+Hit-to-gap was 43.5 dB.  It was 53.3 dB before the swarm existed and 12.6 dB
+the first time the room was levelled by peak instead of by RMS.
 
 Knobs:
 
@@ -230,3 +229,83 @@ Knobs:
 
 The swarm is deliberately quiet -- about 34 dB under the music.  Raise
 `fly_db` toward -50 if it should be more of a feature.
+
+## The machine
+
+The style had `bass=""` -- no bass at all.  It has a sequencer now.
+
+**One line, in the same order, forever.** A 16-step pattern of semitone
+offsets (`GRID_SEQ`), played against the chord root, jumping an octave every
+fourth bar, and otherwise identical bar after bar.  Velocities are fixed at
+1.0 / 0.72 / 0.58 -- downbeats, eighths, the rest.  No glide, no vibrato, no
+timing drift, and no per-note random: the same note renders **bit-identical**
+audio every time it comes round.  A machine does not improvise, and the moment
+it starts to, the whole effect is gone.
+
+    bar 0   F2  F2  F3  F2  C3  F2  F3  F2  F2  F3  C3  F2  Eb3 F2  C3  F3
+    bar 1   F2  F2  F3  F2  C3  F2  F3  F2  F2  F3  C3  F2  Eb3 F2  C3  F3
+    bar 2   F2  F2  F3  F2  C3  F2  F3  F2  F2  F3  C3  F2  Eb3 F2  C3  F3
+
+**Eighths when it is quiet, sixteenths when it is not.** Sections under 0.72
+energy get the 8-step grid; everything louder runs the full sixteen.  The
+machine speeds up as the record does.
+
+**Dark, and it had to be tuned there.** Saw plus square at unison, three
+voices detuned 11 cents, through a 24 dB ladder whose resonance sits at 0.95,
+driven 2.6x.  The filter envelope opens **two fifths of an octave**, not four:
+the first attempt opened 3.8 octaves and measured 53% of its energy above
+1.2 kHz -- a squeal with a sub on it, not a bass.  It now puts 89% of its
+energy below 1.2 kHz, and the spectral centroid of the finished record drops
+from 4496 Hz to 3718 Hz.  That is the darkness.
+
+**Short gates.** A sixteenth is held for 0.12 of a beat and an eighth for
+0.24, with a 35 ms amp decay to 58%.  A sequencer ticks; it does not sing.
+The gap between ticks is where the backbeat lives, and this was the single
+change that mattered -- see the snare column below.
+
+**Three moves keep it off the drums.** `bass_machine=True` turns on all three:
+
+* **it ducks 8 dB on every beat**, 4 ms attack, 220 ms release.  A bass that
+  never stops sits on the kick and the snare body at once.  Ducking makes the
+  pair pump like one machine instead of two.
+* **it plays quietly where the record is quiet** -- gain tracks section
+  energy, 0.55 to 1.0.  Relentless, not deaf.
+* **it switches off with the record**, faded over the last six seconds, so the
+  last thing left standing is the room.
+
+Plus one tonal move: the snare is tuned to 170 Hz, which is the second
+harmonic of every note this thing plays, so 5 dB is tilted off everything
+above 200 Hz.  The bass keeps its weight and the backbeat keeps its body.
+
+Measured out of the master.  "Contrast" is each hit against the quiet 90 ms
+before *it*, which is what "can I hear the drum" actually means -- a bass that
+never fully stops raises the global floor no matter what, so the old
+hit-to-gap number is the wrong instrument here:
+
+                             kick   snare    hat
+      verse    before         9.7    23.0   50.1
+               after          9.4    21.6   36.3
+      chorus   before         9.0    22.5   45.1
+               after          9.1    15.6   41.3
+
+    bass weight, 80-160 Hz     -20.4  ->  -17.7 dBFS   (+2.7 dB)
+    hit-to-gap                  43.5  ->   33.6 dB
+    spectral centroid          4496   ->   3718 Hz
+    onsets per second            9.7  ->   12.1
+
+The chorus snare is the one number that moved, because that is where the
+sixteenths run and there is less gap to hear through.  Its crack is still
+41 dB clear.
+
+One side effect worth having: the analyser used to call this record *"no
+pitched material (a drum / percussion track)"* and hear the key as G# major.
+With an actual bassline in it, it reads **F minor** -- which is what it is.
+
+Knobs:
+
+    bass="grid_bass"      the preset
+    bass_rhythm="grid"    the sequencer (8ths under 0.72 energy, 16ths above)
+    bass_machine=True     the three arrangement moves above
+    bass_duck=8.0         dB of duck on every beat
+    bass_mid_cut=5.0      dB tilted off the harmonics above 200 Hz
+    mix bass=-1.5         level
