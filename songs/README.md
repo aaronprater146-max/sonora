@@ -230,33 +230,26 @@ Knobs:
 The swarm is deliberately quiet -- about 34 dB under the music.  Raise
 `fly_db` toward -50 if it should be more of a feature.
 
-## The machine
+## The machine (DOOM 2016 / UAC Report industrial overhaul)
 
-The style had `bass=""` -- no bass at all.  It has a sequencer now.
+The bass and rhythm have been reworked to capture the dark, brutal industrial
+sound of Mick Gordon's DOOM 2016 OST (specifically "UAC Report File; SHTO36U3").
 
-**One line, in the same order, forever.** A 16-step pattern of semitone
-offsets (`GRID_SEQ`), played against the chord root, jumping an octave every
-fourth bar, and otherwise identical bar after bar.  Velocities are fixed at
-1.0 / 0.72 / 0.58 -- downbeats, eighths, the rest.  No glide, no vibrato, no
-timing drift, and no per-note random: the same note renders **bit-identical**
-audio every time it comes round.  A machine does not improvise, and the moment
-it starts to, the whole effect is gone.
+**DOOM industrial riff:** The repetitive arpeggio progression was removed in favor
+of a punishing, relentless 16-step industrial chug locked to the machine beat,
+accented by dark minor-second (1) grind, evil tritone (6) stabs, and fifth (7) punch:
 
-    bar 0   F2  F2  F3  F2  C3  F2  F3  F2  F2  F3  C3  F2  Eb3 F2  C3  F3
-    bar 1   F2  F2  F3  F2  C3  F2  F3  F2  F2  F3  C3  F2  Eb3 F2  C3  F3
-    bar 2   F2  F2  F3  F2  C3  F2  F3  F2  F2  F3  C3  F2  Eb3 F2  C3  F3
+    (0, 0, 0, 1, 0, 0, 6, 0, 0, 0, 1, 0, 7, 6, 1, 0)
 
-**Eighths when it is quiet, sixteenths when it is not.** Sections under 0.72
-energy get the 8-step grid; everything louder runs the full sixteen.  The
-machine speeds up as the record does.
+**Brutal multi-wave distortion array:** Saw and square unison oscillator pair with
+3 voices detuned 14 cents, saturated sub-oscillator reinforcement (sub=0.40),
+analog noise injection (0.075), driven 3.6x through a 24 dB ladder filter at
+cutoff=240 Hz and res=0.94 with a tight envelope bite.
 
-**Dark, and it had to be tuned there.** Saw plus square at unison, three
-voices detuned 11 cents, through a 24 dB ladder whose resonance sits at 0.95,
-driven 2.6x.  The filter envelope opens **two fifths of an octave**, not four:
-the first attempt opened 3.8 octaves and measured 53% of its energy above
-1.2 kHz -- a squeal with a sub on it, not a bass.  It now puts 89% of its
-energy below 1.2 kHz, and the spectral centroid of the finished record drops
-from 4496 Hz to 3718 Hz.  That is the darkness.
+**Punchy industrial beat:** The drum kit was tightened with elevated kick punch
+and sub weight (punch=1.0, sub=0.85, click=0.70), crisp gated snare crack,
+and an aggressive double-tap syncopated kick pattern (`x..x....x..x....`)
+driving beneath the swung closed hats and clicks.
 
 **Short gates.** A sixteenth is held for 0.12 of a beat and an eighth for
 0.24, with a 35 ms amp decay to 58%.  A sequencer ticks; it does not sing.

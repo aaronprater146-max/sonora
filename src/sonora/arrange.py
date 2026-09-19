@@ -502,9 +502,11 @@ def _maybe_sample(pack: str, notes, dur: float, seed: int, fallback):
     return fallback()
 
 
-# the machine riff: root, root, octave, root, fifth, octave, flat seventh.
-# Sixteen steps in F minor, played in this order every bar.
-GRID_SEQ = (0, 0, 12, 0, 7, 0, 12, 0, 0, 12, 7, 0, 10, 0, 7, 12)
+# DOOM 2016 / UAC Report industrial riff:
+# Relentless brutal low chug locked to the machine beat, cutting with dark
+# minor-second (1) grind, evil tritone (6) stabs, and fifth (7) punch.
+# Sixteen steps in the key, locking into a punishing industrial cadence.
+GRID_SEQ = (0, 0, 0, 1, 0, 0, 6, 0, 0, 0, 1, 0, 7, 6, 1, 0)
 
 
 def render_bass(p: dict, sec: dict, cache: Cache) -> np.ndarray:
@@ -532,7 +534,7 @@ def render_bass(p: dict, sec: dict, cache: Cache) -> np.ndarray:
                 # chord moves and it jumps an octave every fourth bar, and
                 # apart from that it repeats -- that is the whole idea.
                 step = int(round(off * 4.0)) % 16
-                nt = root + GRID_SEQ[step] + (12 if (bar // 4) % 2 else 0)
+                nt = root + GRID_SEQ[step]
             elif br == "acid":
                 seq = [0, 0, 12, 0, 7, 0, 12, 3, 0, 12, 0, 7, 12, 0, 7, 10]
                 nt = root + seq[int(round(off * 4)) % len(seq)]

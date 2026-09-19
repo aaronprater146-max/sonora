@@ -190,13 +190,16 @@ PRESETS: dict[str, dict] = {
     # repeated until the bar ends.  The darkness is a resonant ladder that
     # snaps shut over every step, and a sub an octave down that the filter
     # never quite reaches.  The click is the sequencer itself.
-    "grid_bass": dict(wave_a="saw", wave_b="square", mix=0.40, unison=3,
-                      spread=0.15, detune=11, oct_b=0, sub=0.0,
-                      noise_lvl=0.055,
-                      cutoff=176.0, env_amt=0.40, ftype="lp24", res=0.95,
-                      f_a=0.002, f_d=0.075, f_s=0.16, f_r=0.05,
-                      amp_a=0.002, amp_d=0.035, amp_s=0.58, amp_r=0.026,
-                      drive=2.6, vel_to_cutoff=0.5, vel_to_amp=0.8),
+    # DOOM 2016 Mick Gordon / UAC Report style brutal industrial bass:
+    # Heavy multi-wave distortion array with aggressive ladder filter bite,
+    # saturated sub-weight, tight transient clamp, and industrial drive.
+    "grid_bass": dict(wave_a="saw", wave_b="square", mix=0.45, unison=3,
+                      spread=0.20, detune=14, oct_b=0, sub=0.40,
+                      noise_lvl=0.075,
+                      cutoff=240.0, env_amt=0.60, ftype="lp24", res=0.94,
+                      f_a=0.003, f_d=0.085, f_s=0.20, f_r=0.05,
+                      amp_a=0.002, amp_d=0.045, amp_s=0.62, amp_r=0.030,
+                      drive=3.6, vel_to_cutoff=0.6, vel_to_amp=0.8),
     "hoover": dict(wave_a="supersaw", wave_b="saw", mix=0.4, unison=9, spread=0.85,
                    cutoff=520, env_amt=0.85, ftype="lp24", res=0.55,
                    f_a=0.18, f_d=0.6, f_s=0.5,
